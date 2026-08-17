@@ -8,6 +8,7 @@
 #include <time.h>
 #include <esp32-hal-psram.h>
 #include <esp_mac.h>
+#include <esp_sleep.h>
 #include <esp_system.h>
 #include <mbedtls/sha256.h>
 
@@ -3155,12 +3156,24 @@ void loop() {
   // in a pocket) has nothing that needs sub-25ms responsiveness: touch is
   // the wake source and already gated to its own 25ms poll below, and
   // pollMotion() gates itself to the accelerometer's own ~90ms refresh.
-  // Without this, loop() would spin flat-out re-checking those same gates
-  // thousands of times between each one actually firing, never giving
-  // FreeRTOS's idle task a chance to run -- a real (if modest) bit of idle
-  // power back on top of turnScreenOff()'s CPU-frequency drop, which does
-  // most of the work.
-  if (sleeping && screenOff) delay(15);
+  // Rather than a plain delay() (which only lets the idle task WFI between
+  // FreeRTOS ticks), this actually clock- and power-gates the chip for the
+  // same ~15ms window -- real light sleep, not just an idle CPU. It's safe
+  // to reach for unprompted here specifically because WiFi and BLE are
+  // always fully torn down before this state is ever entered (both only
+  // init on demand, see FamiliarBattleService::beginRadio()'s own comment),
+  // so there's no radio PM lock that could block or get confused by sleep
+  // entry the way there would be on a device that leaves a radio connected.
+  // Timer-only wake source on purpose: TP_INT (pin_config.h) already drives
+  // the touch driver's own interrupt (see the Arduino_CST816x construction
+  // above), and wiring the same pin into esp_sleep_enable_gpio_wakeup() too
+  // risked interacting with that in ways I can't verify without the board
+  // in hand -- worth revisiting once this simpler version is confirmed
+  // solid, since it would cut wake latency from "next 15ms tick" to instant.
+  if (sleeping && screenOff) {
+    esp_sleep_enable_timer_wakeup(15000);
+    esp_light_sleep_start();
+  }
   const uint32_t now = millis();
   serviceSerialDebug();
   if (currentPage == PAGE_BATTLE && battle.state() != FamiliarBattleState::Idle) {
