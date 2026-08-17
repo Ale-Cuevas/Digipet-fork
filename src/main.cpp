@@ -124,9 +124,10 @@ RTC_DATA_ATTR bool rtcIdling = false;
 // reboot (deep sleep has no lighter "resume" option -- see enterDeepIdle()),
 // which costs real time and current on its own before the chip can even
 // get back down to deep sleep's own floor, so too tight an interval would
-// spend more time booting than actually asleep. This is a starting point
-// worth checking against the meter, not a measured-optimal value.
-constexpr uint64_t kIdlePollIntervalUs = 1000000;  // 1s
+// spend more time booting than actually asleep. 1s measured worse than
+// light sleep did; 5s is the next data point, not a settled value -- see
+// the commit that changed this for the readings behind it.
+constexpr uint64_t kIdlePollIntervalUs = 5000000;  // 5s
 uint32_t lastBootRead = 0;
 uint32_t nextBlink = 0;
 uint32_t blinkUntil = 0;
