@@ -108,6 +108,16 @@ bool clockValid = false;
 bool timeSynced = false;
 uint32_t lastClockDraw = 0;
 uint32_t sleepStarted = 0;
+// Captured once in setup() via getCpuFrequencyMhz() rather than assumed, so
+// turnScreenOff()/wakeUp() restore whatever this board's own default
+// actually is instead of a guessed constant. Deep idle (asleep, screen
+// off) runs the CPU at kIdleCpuMhz instead -- with WiFi/BLE already fully
+// off in that state (both only ever init on demand, see
+// FamiliarBattleService::beginRadio()'s own comment), there's no radio
+// timing floor to respect, and 80 MHz is the conservative, widely-used
+// "still safe for I2C/UART" floor rather than pushing all the way down.
+uint32_t fullCpuMhz = 240;
+constexpr uint32_t kIdleCpuMhz = 80;
 uint32_t lastImuRead = 0;
 uint32_t lastBootRead = 0;
 uint32_t nextBlink = 0;
@@ -2699,6 +2709,7 @@ void turnScreenOff() {
   imuBaselineReady = false;
   panel->setBrightness(0);
   panel->displayOff();
+  setCpuFrequencyMhz(kIdleCpuMhz);
   Serial.println("Display: off; lift and selected wake control remain active");
 }
 
@@ -2714,6 +2725,7 @@ void showIdleFromLift() {
 }
 
 void wakeUp() {
+  setCpuFrequencyMhz(fullCpuMhz);
   if (screenOff) panel->displayOn();
   sleeping = false;
   screenOff = false;
@@ -3036,6 +3048,7 @@ void handleItemsTap(int16_t x, int16_t y) {
 }
 
 void setup() {
+  fullCpuMhz = getCpuFrequencyMhz();
   Serial.begin(115200);
   delay(100);
   Serial.printf("Digipet firmware v%s\n", DIGIPET_VERSION);
@@ -3126,6 +3139,16 @@ void setup() {
 }
 
 void loop() {
+  // Deep idle (asleep, screen off -- the common state once this is riding
+  // in a pocket) has nothing that needs sub-25ms responsiveness: touch is
+  // the wake source and already gated to its own 25ms poll below, and
+  // pollMotion() gates itself to the accelerometer's own ~90ms refresh.
+  // Without this, loop() would spin flat-out re-checking those same gates
+  // thousands of times between each one actually firing, never giving
+  // FreeRTOS's idle task a chance to run -- a real (if modest) bit of idle
+  // power back on top of turnScreenOff()'s CPU-frequency drop, which does
+  // most of the work.
+  if (sleeping && screenOff) delay(15);
   const uint32_t now = millis();
   serviceSerialDebug();
   if (currentPage == PAGE_BATTLE && battle.state() != FamiliarBattleState::Idle) {
