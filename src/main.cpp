@@ -2965,9 +2965,21 @@ void setup() {
       // no visibility into whether it's cycling healthily or dying on its
       // own before a real wake is ever attempted. Pull this back out once
       // the wake-after-deep-sleep hang is found.
+      //
+      // Native USB CDC (this board has no separate USB-serial bridge chip)
+      // needs real time to re-enumerate with the host after the hard reset
+      // deep sleep causes -- the first attempt at this heartbeat printed
+      // nothing at all and the connection never came back, most likely
+      // because it went straight back to sleep before the port was even
+      // attached, let alone before the print physically went out. These
+      // delays exist purely to give USB room to actually work for this
+      // debugging round; they're a real, deliberate power cost on top of
+      // the temporary Serial.begin() above, not something to keep either.
       Serial.begin(115200);
+      delay(300);
       Serial.println("idle check: not pressed, back to sleep");
       Serial.flush();
+      delay(200);
       enterDeepIdle();  // never returns
     }
     // Boot key is down: a real wake. Falls through to the rest of setup(),
