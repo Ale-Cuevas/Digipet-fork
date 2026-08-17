@@ -23,8 +23,6 @@ Power it on and a five-second boot sequence (real audio, BIOS-style sync
 log) hands off to your companion. From there:
 
 - Feed, play, and train it through animated Companion and Status pages
-- Carry it in a pocket and it notices: the onboard accelerometer counts
-  steps, and walking around slows Food and Energy decay
 - Battle another Digipet live over BLE on a dedicated PVP page, with
   stats, elements, and move matchups negotiated between the two devices
 - Scan for nearby WiFi and BLE devices to earn food, and rarer items that

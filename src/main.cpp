@@ -26,8 +26,13 @@
 constexpr uint32_t PET_MAGIC_V1 = 0x44504731;
 constexpr uint32_t PET_MAGIC_V2 = 0x44504732;
 constexpr uint32_t PET_MAGIC_V3 = 0x44504733;  // no bonusHp/Attack/Defense/Special fields yet
-constexpr uint32_t PET_MAGIC_V4 = 0x44504734;  // no stepsTotal field yet
-constexpr uint32_t PET_MAGIC = 0x44504735;
+// Not part of the normal V1..V3 lineage: the pocket-pedometer feature added
+// a stepsTotal field under this magic and shipped to the one device this
+// firmware actually runs on, then got pulled back out the same day. Kept
+// here solely so loadPet() can downgrade that one device's save gracefully
+// instead of failing to recognize it and silently starting a new egg.
+constexpr uint32_t PET_MAGIC_PEDOMETER = 0x44504735;
+constexpr uint32_t PET_MAGIC = 0x44504734;
 constexpr uint32_t ANIMATION_MS = 650;
 constexpr uint32_t SETTINGS_MAGIC_V1 = 0x44505331;
 constexpr uint32_t SETTINGS_MAGIC_V2 = 0x44505332;
@@ -134,19 +139,6 @@ bool imuBaselineReady = false;
 float lastAccelX = 0;
 float lastAccelY = 0;
 float lastAccelZ = 0;
-// Pocket-pedometer state (pollMotion() below), separate from the lift-wake
-// baseline above even though both read the same accelerometer stream --
-// lift-wake wants a raw per-axis delta between consecutive samples, this
-// wants a slow-tracked baseline on acceleration *magnitude* so it keeps
-// working no matter how the device is oriented in a pocket.
-bool stepBaselineReady = false;
-float stepAccelBaseline = 1.0f;
-bool stepAboveThreshold = false;
-uint32_t lastStepTime = 0;
-// Steps since the last agePet() tick; folded into pet.stepsTotal (lifetime,
-// persisted) immediately, but also read and reset once a minute by agePet()
-// itself to decide whether that minute counts as "walked".
-uint32_t stepsThisMinute = 0;
 char clockText[6] = "--:--";
 // `message` is the current feedback string; it's only actually shown while
 // `toastVisible` is true, as a slide-down banner drawn by drawToastOverlay()
@@ -1158,10 +1150,9 @@ void loadPet() {
   if (storedSize == sizeof(pet)) {
     preferences.getBytes("state", &pet, sizeof(pet));
   } else if (storedSize > 0) {
-    // PET_MAGIC's own layout immediately before the pedometer feature added
-    // stepsTotal -- everyone's stored pet was this shape immediately before
-    // today.
-    struct StateV4 {
+    // See PET_MAGIC_PEDOMETER's own comment above -- this is the shape that
+    // magic was saved under, present only to migrate off of it gracefully.
+    struct StatePedometer {
       uint32_t magic;
       uint32_t ageMinutes;
       uint32_t actions;
@@ -1176,10 +1167,12 @@ void loadPet() {
       uint8_t bonusAttack;
       uint8_t bonusDefense;
       uint8_t bonusSpecial;
+      uint32_t stepsTotal;
       PetGenome genome;
-    } v4{};
-    // PET_MAGIC_V4's own layout, minus the bonusHp/Attack/Defense/Special
-    // fields the Items feature added.
+    } pedometer{};
+    // PET_MAGIC's own current layout, minus the bonusHp/Attack/Defense/
+    // Special fields the Items feature added -- everyone's stored pet was
+    // this shape immediately before today.
     struct StateV3 {
       uint32_t magic;
       uint32_t ageMinutes;
@@ -1209,40 +1202,41 @@ void loadPet() {
       uint32_t magic, ageMinutes, actions;
       uint8_t food, joy, energy, health;
     } old{};
-    if (storedSize == sizeof(v4)) {
-      preferences.getBytes("state", &v4, sizeof(v4));
+    if (storedSize == sizeof(pedometer)) {
+      preferences.getBytes("state", &pedometer, sizeof(pedometer));
     } else if (storedSize == sizeof(v3)) {
       preferences.getBytes("state", &v3, sizeof(v3));
     } else if (storedSize == sizeof(previous)) {
       preferences.getBytes("state", &previous, sizeof(previous));
     }
-    if (v4.magic == PET_MAGIC_V4) {
-      pet = {PET_MAGIC, v4.ageMinutes, v4.actions, v4.food, v4.joy, v4.energy,
-             v4.health, v4.stage, v4.training, {v4.reserved[0], v4.reserved[1]},
-             v4.bonusHp, v4.bonusAttack, v4.bonusDefense, v4.bonusSpecial, 0,
-             v4.genome};
-      Serial.println("Pet: existing companion gained a step counter");
+    if (pedometer.magic == PET_MAGIC_PEDOMETER) {
+      pet = {PET_MAGIC, pedometer.ageMinutes, pedometer.actions, pedometer.food,
+             pedometer.joy, pedometer.energy, pedometer.health, pedometer.stage,
+             pedometer.training, {pedometer.reserved[0], pedometer.reserved[1]},
+             pedometer.bonusHp, pedometer.bonusAttack, pedometer.bonusDefense,
+             pedometer.bonusSpecial, pedometer.genome};
+      Serial.println("Pet: existing companion kept (pedometer field dropped)");
     } else if (v3.magic == PET_MAGIC_V3) {
       pet = {PET_MAGIC, v3.ageMinutes, v3.actions, v3.food, v3.joy, v3.energy,
              v3.health, v3.stage, v3.training, {v3.reserved[0], v3.reserved[1]},
-             0, 0, 0, 0, 0, v3.genome};
+             0, 0, 0, 0, v3.genome};
       Serial.println("Pet: existing companion gained battle-stat item slots");
     } else if (previous.magic == PET_MAGIC_V2) {
       pet = {PET_MAGIC, previous.ageMinutes, previous.actions, previous.food,
              previous.joy, previous.energy, previous.health, previous.stage,
              previous.training, {previous.reserved[0], previous.reserved[1]},
-             0, 0, 0, 0, 0, generatePetGenome()};
+             0, 0, 0, 0, generatePetGenome()};
       Serial.println("Pet: existing companion received a persistent genome");
     } else if (storedSize >= sizeof(old)) {
       preferences.getBytes("state", &old, sizeof(old));
     }
     if (old.magic == PET_MAGIC_V1) {
       pet = {PET_MAGIC, old.ageMinutes, old.actions, old.food, old.joy,
-             old.energy, old.health, 1, 0, {0, 0}, 0, 0, 0, 0, 0, generatePetGenome()};
+             old.energy, old.health, 1, 0, {0, 0}, 0, 0, 0, 0, generatePetGenome()};
     }
   }
   if (pet.magic != PET_MAGIC) {
-    pet = {PET_MAGIC, 0, 0, 82, 82, 82, 100, 0, 0, {0, 0}, 0, 0, 0, 0, 0,
+    pet = {PET_MAGIC, 0, 0, 82, 82, 82, 100, 0, 0, {0, 0}, 0, 0, 0, 0,
            generatePetGenome()};
     Serial.printf("Pet: new %s selected (%s affinity)\n",
                   eggLineageName(pet.genome.lineage),
@@ -1560,8 +1554,7 @@ void beginNewEgg(uint8_t mode) {
       inheritedHp || inheritedAttack || inheritedDefense || inheritedSpecial;
 
   pet = {PET_MAGIC, 0, 0, 82, 82, 82, 100, 0, 0, {5, 0},
-         inheritedHp, inheritedAttack, inheritedDefense, inheritedSpecial, 0,
-         nextGenome};
+         inheritedHp, inheritedAttack, inheritedDefense, inheritedSpecial, nextGenome};
   savePet();
   if (settings.themeIndex == 0) applyTheme();
   newEggConfirmation = false;
@@ -2353,8 +2346,7 @@ void handleStatusGridTap(int16_t x, int16_t y) {
     showingItems = true;
     presentOverlayEntrance(PAGE_STATUS, drawItemsPage);
   } else if (tile >= 5) {
-    // Tile 5 (STEPS) is informational, not a locked placeholder like 6/7 --
-    // either way, nothing to do on tap.
+    // Reserved-for-later locked tiles -- nothing to do yet.
   } else {
     performAction(tile);
   }
@@ -2662,23 +2654,8 @@ void performAction(int action) {
 
 void agePet() {
   pet.ageMinutes++;
-  // A pocket pedometer minute: a bit of walking staves off this tick's
-  // usual food/joy decay (kWalkStepsPerMinute is a low bar on purpose --
-  // detection through fabric in a pocket undercounts), and a genuinely
-  // active minute has a chance to drop bonus food on top, the way a good
-  // walk would. stepsThisMinute itself comes from pollMotion() and isn't
-  // persisted; only the running pet.stepsTotal it also updates is.
-  constexpr uint32_t kWalkStepsPerMinute = 20;
-  constexpr uint32_t kActiveStepsPerMinute = 60;
-  const bool walked = stepsThisMinute >= kWalkStepsPerMinute;
-  if (stepsThisMinute >= kActiveStepsPerMinute && esp_random() % 4 == 0) {
-    pet.food = addClamped(pet.food, 3);
-    showToastf("Good walk: +3 food (%lu steps)",
-               static_cast<unsigned long>(stepsThisMinute));
-  }
-  stepsThisMinute = 0;
-  if (!walked && pet.ageMinutes % 5 == 0) pet.food = subtractClamped(pet.food, 1);
-  if (!walked && pet.ageMinutes % 8 == 0) pet.joy = subtractClamped(pet.joy, 1);
+  if (pet.ageMinutes % 5 == 0) pet.food = subtractClamped(pet.food, 1);
+  if (pet.ageMinutes % 8 == 0) pet.joy = subtractClamped(pet.joy, 1);
   if (sleeping) {
     pet.energy = addClamped(pet.energy, 5);
     if (pet.health < 100) pet.health = addClamped(pet.health, 1);
@@ -2750,44 +2727,11 @@ void wakeUp() {
   drawHome();
 }
 
-// Reads the accelerometer once per ~90 ms tick (the QMI8658's own 11 Hz
-// low-power refresh rate, see initializeLiftSensor()) and drives two
-// independent jobs off that one reading:
-//
-//   - Step detection runs unconditionally, screen on or off, since this is
-//     meant to live in a pocket and most walking happens with the display
-//     asleep. A footstep is a brief spike in acceleration *magnitude* above
-//     a slow-tracked baseline; tracking magnitude rather than a raw axis
-//     means it doesn't care which way up the device is riding in a pocket.
-//     11 Hz comfortably clears Nyquist for a walking cadence (~1.5-2.5 Hz);
-//     it'll undercount a fast run, which is an acceptable simplification
-//     for a companion you carry around rather than a sports watch.
-//   - Lift-wake only matters, and is only armed, while the screen is off --
-//     unchanged from before this function grew a second job.
-void pollMotion(uint32_t now) {
-  if (!imuReady || now - lastImuRead < 90) return;
+void pollLiftWake(uint32_t now) {
+  if (!screenOff || !imuReady || now - lastImuRead < 90) return;
   lastImuRead = now;
   float x, y, z;
   if (!readAcceleration(x, y, z)) return;
-
-  const float magnitude = sqrtf(x * x + y * y + z * z);
-  if (!stepBaselineReady) {
-    stepAccelBaseline = magnitude;
-    stepBaselineReady = true;
-  } else {
-    stepAccelBaseline += (magnitude - stepAccelBaseline) * 0.08f;
-    const float deviation = magnitude - stepAccelBaseline;
-    if (!stepAboveThreshold && deviation > 0.35f && now - lastStepTime > 250) {
-      stepAboveThreshold = true;
-      lastStepTime = now;
-      stepsThisMinute++;
-      pet.stepsTotal++;
-    } else if (stepAboveThreshold && deviation < 0.15f) {
-      stepAboveThreshold = false;
-    }
-  }
-
-  if (!screenOff) return;
   if (!imuBaselineReady) {
     lastAccelX = x; lastAccelY = y; lastAccelZ = z;
     imuBaselineReady = true;
@@ -3155,7 +3099,7 @@ void loop() {
   // Deep idle (asleep, screen off -- the common state once this is riding
   // in a pocket) has nothing that needs sub-25ms responsiveness: touch is
   // the wake source and already gated to its own 25ms poll below, and
-  // pollMotion() gates itself to the accelerometer's own ~90ms refresh.
+  // pollLiftWake() gates itself to the accelerometer's own ~90ms refresh.
   // Rather than a plain delay() (which only lets the idle task WFI between
   // FreeRTOS ticks), this actually clock- and power-gates the chip for the
   // same ~15ms window -- real light sleep, not just an idle CPU. It's safe
@@ -3214,7 +3158,7 @@ void loop() {
   }
 
   if (sleeping && !screenOff && now - sleepStarted >= 10000) turnScreenOff();
-  pollMotion(now);
+  pollLiftWake(now);
   pollBootWake(now);
 
   if (sleeping && !screenOff && now - lastAnimation >= 900) {
