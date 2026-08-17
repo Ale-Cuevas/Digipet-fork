@@ -123,6 +123,11 @@ uint32_t lastBootRead = 0;
 uint32_t nextBlink = 0;
 uint32_t blinkUntil = 0;
 bool bootWasDown = false;
+// Tracks AUDIO_PA independent of screenOff -- showIdleFromLift() clears
+// screenOff on its own without touching the amp, so wakeUp() needs its own
+// signal for "was the amp actually powered down" rather than re-deriving it
+// from screenOff, which may already have been cleared by the time it runs.
+bool audioPaOn = true;
 bool imuReady = false;
 bool imuBaselineReady = false;
 float lastAccelX = 0;
@@ -2709,6 +2714,8 @@ void turnScreenOff() {
   imuBaselineReady = false;
   panel->setBrightness(0);
   panel->displayOff();
+  digitalWrite(AUDIO_PA, LOW);
+  audioPaOn = false;
   setCpuFrequencyMhz(kIdleCpuMhz);
   Serial.println("Display: off; lift and selected wake control remain active");
 }
@@ -2727,6 +2734,11 @@ void showIdleFromLift() {
 void wakeUp() {
   setCpuFrequencyMhz(fullCpuMhz);
   if (screenOff) panel->displayOn();
+  if (!audioPaOn) {
+    digitalWrite(AUDIO_PA, HIGH);
+    delay(20);  // same settle time initAudio() already waits after this pin
+    audioPaOn = true;
+  }
   sleeping = false;
   screenOff = false;
   lastInteraction = millis();
