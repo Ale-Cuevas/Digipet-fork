@@ -7,6 +7,7 @@
 #include <cstdarg>
 #include <time.h>
 #include <esp32-hal-psram.h>
+#include <esp_attr.h>
 #include <esp_mac.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
@@ -113,16 +114,19 @@ bool clockValid = false;
 bool timeSynced = false;
 uint32_t lastClockDraw = 0;
 uint32_t sleepStarted = 0;
-// Captured once in setup() via getCpuFrequencyMhz() rather than assumed, so
-// turnScreenOff()/wakeUp() restore whatever this board's own default
-// actually is instead of a guessed constant. Deep idle (asleep, screen
-// off) runs the CPU at kIdleCpuMhz instead -- with WiFi/BLE already fully
-// off in that state (both only ever init on demand, see
-// FamiliarBattleService::beginRadio()'s own comment), there's no radio
-// timing floor to respect, and 80 MHz is the conservative, widely-used
-// "still safe for I2C/UART" floor rather than pushing all the way down.
-uint32_t fullCpuMhz = 240;
-constexpr uint32_t kIdleCpuMhz = 80;
+// Survives deep sleep (regular globals don't -- deep sleep is a reboot, not
+// a resume). True from the moment enterDeepIdle() first runs until a real
+// wake, so setup() can tell "this reset is one of the periodic boot-key
+// checks while idling" apart from a genuine power-on/reflash. See
+// enterDeepIdle() and setup()'s own use of this near its very top.
+RTC_DATA_ATTR bool rtcIdling = false;
+// How often the boot key gets checked while idling. Each check is a full
+// reboot (deep sleep has no lighter "resume" option -- see enterDeepIdle()),
+// which costs real time and current on its own before the chip can even
+// get back down to deep sleep's own floor, so too tight an interval would
+// spend more time booting than actually asleep. This is a starting point
+// worth checking against the meter, not a measured-optimal value.
+constexpr uint64_t kIdlePollIntervalUs = 1000000;  // 1s
 uint32_t lastBootRead = 0;
 uint32_t nextBlink = 0;
 uint32_t blinkUntil = 0;
@@ -2639,30 +2643,37 @@ void enterSleep() {
   drawSleep();
 }
 
+// Deep sleep is a reboot, not a resume -- there is no lighter-weight way
+// to wait here, so this never returns. setup()'s own fast path (see its
+// top) is the other half of this: it's what actually checks the boot key
+// on each of these wakes and either goes straight back here or falls
+// through to a real resume.
+void enterDeepIdle() {
+  rtcIdling = true;
+  esp_sleep_enable_timer_wakeup(kIdlePollIntervalUs);
+  esp_deep_sleep_start();
+}
+
 void turnScreenOff() {
   if (!sleeping || screenOff) return;
   screenOff = true;
   panel->setBrightness(0);
   panel->displayOff();
   digitalWrite(AUDIO_PA, LOW);
-  setCpuFrequencyMhz(kIdleCpuMhz);
-  Serial.println("Display: off; boot key wake remains active");
+  Serial.println("Display: off; entering deep sleep, boot key remains the only wake");
+  enterDeepIdle();  // never returns
 }
 
-// screenOff is now the one and only signal for "display and amp are
-// powered down" -- it used to also get cleared by a since-removed
-// lift-wake preview state without touching either of those, which is why
-// this used to need its own separate audioPaOn flag. With that gone,
-// screenOff and "was the amp cut" are always in lockstep again.
+// Only reachable from pollBootWake() during the brief sleeping-but-not-
+// screenOff window (the blinking-face countdown in enterSleep(), before
+// turnScreenOff() hands off to deep sleep) -- a real wake from deep sleep
+// goes through setup()'s own fast path instead, since deep sleep is a
+// reboot and this function's in-RAM state wouldn't have survived it
+// anyway. screenOff is therefore always false here; nothing left to
+// restore for the display/amp the way earlier revisions of this function
+// needed to.
 void wakeUp() {
-  setCpuFrequencyMhz(fullCpuMhz);
-  if (screenOff) {
-    panel->displayOn();
-    digitalWrite(AUDIO_PA, HIGH);
-    delay(20);  // same settle time initAudio() already waits after this pin
-  }
   sleeping = false;
-  screenOff = false;
   lastInteraction = millis();
   panel->setBrightness(brightnessLevel());
   showToast("Link restored");
@@ -2934,11 +2945,34 @@ void handleItemsTap(int16_t x, int16_t y) {
 }
 
 void setup() {
-  fullCpuMhz = getCpuFrequencyMhz();
+  // Deep-sleep idle-check fast path. While this is idling in a pocket, this
+  // exact reboot happens once every kIdlePollIntervalUs, so it has to cost
+  // as close to nothing as possible: GPIO0 doesn't need Serial, Wire,
+  // Preferences, or any peripheral to read, so none of that runs at all
+  // unless the boot key is actually down. Only a genuine deep-sleep wake
+  // with rtcIdling still set counts as one of these checks -- any other
+  // reset (power-on, USB reflash, brownout, ...) falls straight through to
+  // the normal boot below, and rtcIdling wouldn't mean anything outside of
+  // a real deep-sleep wake anyway.
+  const bool resumingFromDeepIdle =
+      esp_reset_reason() == ESP_RST_DEEPSLEEP && rtcIdling;
+  if (resumingFromDeepIdle) {
+    pinMode(0, INPUT_PULLUP);
+    if (digitalRead(0) != LOW) {
+      enterDeepIdle();  // never returns
+    }
+    // Boot key is down: a real wake. Falls through to the rest of setup(),
+    // which skips the animated intro and network sync further down but
+    // otherwise re-initializes hardware the normal way -- deep sleep
+    // doesn't leave anything short of that actually usable.
+  }
+  rtcIdling = false;
+
   Serial.begin(115200);
   delay(100);
   Serial.printf("Digipet firmware v%s\n", DIGIPET_VERSION);
-  Serial.printf("Reset reason: %d\n", static_cast<int>(esp_reset_reason()));
+  Serial.printf("Reset reason: %d%s\n", static_cast<int>(esp_reset_reason()),
+                resumingFromDeepIdle ? " (deep-sleep resume)" : "");
   Wire.begin(IIC_SDA, IIC_SCL);
   preferences.begin("digipet", false);
   loadSettings();
@@ -2987,31 +3021,34 @@ void setup() {
   Serial.printf("PSRAM: %u bytes; smooth transitions: %s\n",
                 ESP.getPsramSize(), transitionsReady ? "ready" : "fallback");
 
-  if (settings.bootAnimationEnabled) {
+  // The animated intro is a first-boot thing. Replaying it on every resume
+  // from deep sleep would reintroduce exactly the "reboot every time you
+  // want to glance at your pet" cost deep sleep is meant to avoid -- a
+  // resume just brings brightness back up instead, skipping even the
+  // disabled-boot-animation fallback's own delay(350).
+  if (resumingFromDeepIdle) {
+    panel->setBrightness(brightnessLevel());
+  } else if (settings.bootAnimationEnabled) {
     bootAnimation();
+    panel->setBrightness(brightnessLevel());
   } else {
     panel->setBrightness(brightnessLevel());
     display->fillScreen(COLOR_BACKGROUND);
     drawCentered("DIGIPET", 196, 4, COLOR_MINT);
     delay(350);
   }
-  panel->setBrightness(brightnessLevel());
 
-  // The rest of hardware bring-up and any network/time sync now run as
-  // their own visible phase, after the animation has already played
-  // uninterrupted rather than polled mid-frame.
+  // The rest of hardware bring-up runs as its own visible phase, after the
+  // animation has already played uninterrupted rather than polled
+  // mid-frame -- unchanged on a resume. Network/time sync is skipped on a
+  // resume specifically: it's a once-per-real-boot thing (the RTC keeps
+  // time on its own afterward), and repeating its up-to-12s connect
+  // attempt (see runStartupNetworkSync()) on every wake would be a far
+  // worse cost than the animation ever was.
   detectHardware();
-  runStartupNetworkSync();
+  if (!resumingFromDeepIdle) runStartupNetworkSync();
   generatePlayerId();
   checkEvolution();
-
-  if (transitionsReady) {
-    renderPageToCanvas(currentPage, pageCanvasA);
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(),
-                              LCD_WIDTH, LCD_HEIGHT);
-  } else {
-    drawHome();
-  }
 
   if (touch->begin()) {
     touch->IIC_Write_Device_State(
@@ -3021,27 +3058,26 @@ void setup() {
   pinMode(0, INPUT_PULLUP);
   nextBlink = millis() + 2200;
   lastMinute = lastInteraction = lastAnimation = millis();
+
+  // wakeUp() draws its own frame (with the "Link restored" toast/chime) on
+  // a resume, so the plain draw below is only for a genuine boot -- doing
+  // both would just be the same frame painted twice.
+  if (resumingFromDeepIdle) {
+    wakeUp();
+  } else if (transitionsReady) {
+    renderPageToCanvas(currentPage, pageCanvasA);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(),
+                              LCD_WIDTH, LCD_HEIGHT);
+  } else {
+    drawHome();
+  }
 }
 
 void loop() {
-  // Deep idle (asleep, screen off -- the common state once this is riding
-  // in a pocket) has nothing that needs sub-25ms responsiveness at all
-  // anymore: touch can't wake it (the touch read below is skipped entirely
-  // while sleeping) and there's no accelerometer polling running in this
-  // state either -- the only thing still checked on a timer is the boot
-  // key, itself gated to its own 25ms poll in pollBootWake(). Rather than a
-  // plain delay() (which only lets the idle task WFI between FreeRTOS
-  // ticks), this actually clock- and power-gates the chip for the same
-  // ~15ms window -- real light sleep, not just an idle CPU. It's safe to
-  // reach for unprompted here specifically because WiFi and BLE are always
-  // fully torn down before this state is ever entered (both only init on
-  // demand, see FamiliarBattleService::beginRadio()'s own comment), so
-  // there's no radio PM lock that could block or get confused by sleep
-  // entry the way there would be on a device that leaves a radio connected.
-  if (sleeping && screenOff) {
-    esp_sleep_enable_timer_wakeup(15000);
-    esp_light_sleep_start();
-  }
+  // screenOff can never be observed true here: turnScreenOff() hands off
+  // straight to enterDeepIdle(), which reboots the device rather than
+  // returning to this loop. Deep idle is handled entirely in setup()'s own
+  // fast path instead -- see its top and enterDeepIdle()'s own comment.
   const uint32_t now = millis();
   serviceSerialDebug();
   if (currentPage == PAGE_BATTLE && battle.state() != FamiliarBattleState::Idle) {
