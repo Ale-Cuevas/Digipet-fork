@@ -85,6 +85,7 @@ void seedTestPet(uint8_t stage) {
   pet.health = 100;
   pet.stage = stage;
   pet.training = 40;
+  pet.stepsTotal = 8412;
   pet.genome = derivePetGenome(seed, evolutionSeed);
 }
 

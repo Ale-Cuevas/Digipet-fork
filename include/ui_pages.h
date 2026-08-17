@@ -49,6 +49,12 @@ struct PetState {
   uint8_t bonusAttack;
   uint8_t bonusDefense;
   uint8_t bonusSpecial;
+  // Lifetime steps counted by the pocket pedometer (main.cpp's pollMotion(),
+  // reading the same QMI8658 that already runs lift-wake). Added in
+  // PET_MAGIC's 5th schema (see main.cpp's own PET_MAGIC_V4/PET_MAGIC
+  // comment). Resets to 0 on a new egg; unlike the bonus stats above,
+  // walking isn't something a companion "passes on".
+  uint32_t stepsTotal;
   PetGenome genome;
 };
 

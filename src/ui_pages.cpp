@@ -173,7 +173,8 @@ void drawActionTile(uint8_t action, int16_t x, int16_t y, const char *label,
   } else if (action < 3) {
     drawStatIcon(static_cast<StatIcon>(action), x + 64, y + 18, iconColor);
   }
-  // action >= 5 (a reserved-for-later placeholder) gets no icon at all.
+  // action >= 5 gets no icon at all -- STEPS (5) reads fine as text-only,
+  // and 6/7 are still reserved-for-later placeholders.
   // label is size 2 (was 1) -- it's the tile's actual name (FEED, RECON
   // LOG, ...), the same "title" role drawCentered()'s own size-3 page
   // titles play, just one step down; value stays size 1 as its
@@ -907,7 +908,13 @@ void drawStatusActionsView() {
         inventory.counts[2] + inventory.counts[3] + inventory.counts[4];
     snprintf(itemsValue, sizeof(itemsValue), "%u HELD", itemCount);
     drawActionTile(4, 18, 78, "ITEMS", itemsValue);
-    drawActionTile(5, 190, 78, "LOCKED", "COMING SOON", /*locked=*/true);
+    // Pocket-pedometer readout (pollMotion(), main.cpp) -- informational
+    // only, so tile 5 stays a no-op tap the same way the still-locked tiles
+    // next to it are; see handleStatusGridTap()'s own "tile >= 5" comment.
+    char stepsValue[16];
+    snprintf(stepsValue, sizeof(stepsValue), "%lu LIFETIME",
+             static_cast<unsigned long>(pet.stepsTotal));
+    drawActionTile(5, 190, 78, "STEPS", stepsValue);
     drawActionTile(6, 18, 227, "LOCKED", "COMING SOON", /*locked=*/true);
     drawActionTile(7, 190, 227, "LOCKED", "COMING SOON", /*locked=*/true);
   }
