@@ -239,6 +239,10 @@ struct DeviceSettings {
   bool soundEnabled;
   bool bootAnimationEnabled;
   uint8_t volumeIndex;
+  // No longer read anywhere -- Wake Mode was retired (touch can't wake the
+  // device at all now, only the boot key). Left in place rather than
+  // removed so this struct's layout, and every offset after it, doesn't
+  // need yet another settings-schema migration for a single dead byte.
   uint8_t wakeMode;
   uint8_t themeIndex;
 };
@@ -246,7 +250,6 @@ extern DeviceSettings settings;
 
 extern const char *SLEEP_LABELS[];
 extern const char *VOLUME_LABELS[];
-extern const char *WAKE_LABELS[];
 extern const char *THEME_LABELS[];
 extern uint8_t settingsGridPage;
 uint8_t brightnessPercent();
@@ -291,6 +294,10 @@ enum SettingsView : uint8_t {
   SETTINGS_BRIGHTNESS,
   SETTINGS_IDLE,
   SETTINGS_VOLUME,
+  // Retired along with the Wake Mode tile/picker -- never assigned to
+  // settingsView anymore. Kept as a placeholder in the enum so
+  // changeSetting()'s tile-index-to-view arithmetic (main.cpp) doesn't
+  // need to renumber SETTINGS_THEME/SETTINGS_BOOT.
   SETTINGS_WAKE,
   SETTINGS_THEME,
   SETTINGS_BOOT,
@@ -447,7 +454,7 @@ void drawItemsPage();
 
 void drawSettingsIcon(uint8_t item, int16_t cx, int16_t cy, uint16_t color);
 void drawSettingsTile(uint8_t item, int16_t x, int16_t y, const char *label,
-                      const char *value);
+                      const char *value, bool locked = false);
 void drawSettingsBack();
 void drawChoiceRow(const char *label, int16_t y, bool selected);
 void drawThemeSwatch(int16_t cx, int16_t cy, uint8_t themeIndex);

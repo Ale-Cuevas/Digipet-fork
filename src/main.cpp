@@ -81,7 +81,6 @@ const uint32_t SLEEP_TIMEOUTS[] = {15000, 30000, 60000, 120000};
 const char *SLEEP_LABELS[] = {"15 SEC", "30 SEC", "1 MIN", "2 MIN"};
 const char *VOLUME_LABELS[] = {"MUTE", "LOW", "MEDIUM", "HIGH", "MAX"};
 const uint8_t CODEC_VOLUMES[] = {0x00, 0x58, 0x8B, 0xBF, 0xF2};
-const char *WAKE_LABELS[] = {"TOUCH", "BOOT KEY"};
 const char *THEME_LABELS[] = {"AUTO // PET", "CYBER MINT", "AMBER CORE",
                               "VIOLET LINK", "MONO SIGNAL"};
 uint8_t settingsGridPage = 0;
@@ -124,21 +123,10 @@ uint32_t sleepStarted = 0;
 // "still safe for I2C/UART" floor rather than pushing all the way down.
 uint32_t fullCpuMhz = 240;
 constexpr uint32_t kIdleCpuMhz = 80;
-uint32_t lastImuRead = 0;
 uint32_t lastBootRead = 0;
 uint32_t nextBlink = 0;
 uint32_t blinkUntil = 0;
 bool bootWasDown = false;
-// Tracks AUDIO_PA independent of screenOff -- showIdleFromLift() clears
-// screenOff on its own without touching the amp, so wakeUp() needs its own
-// signal for "was the amp actually powered down" rather than re-deriving it
-// from screenOff, which may already have been cleared by the time it runs.
-bool audioPaOn = true;
-bool imuReady = false;
-bool imuBaselineReady = false;
-float lastAccelX = 0;
-float lastAccelY = 0;
-float lastAccelZ = 0;
 char clockText[6] = "--:--";
 // `message` is the current feedback string; it's only actually shown while
 // `toastVisible` is true, as a slide-down banner drawn by drawToastOverlay()
@@ -440,48 +428,6 @@ uint8_t bcdToDec(uint8_t value) {
 
 uint8_t decToBcd(uint8_t value) {
   return ((value / 10) << 4) | (value % 10);
-}
-
-bool imuWrite(uint8_t reg, uint8_t value) {
-  const uint8_t address = i2cPresent(0x6B) ? 0x6B : 0x6A;
-  Wire.beginTransmission(address);
-  Wire.write(reg);
-  Wire.write(value);
-  return Wire.endTransmission() == 0;
-}
-
-bool imuRead(uint8_t reg, uint8_t *data, uint8_t length) {
-  const uint8_t address = i2cPresent(0x6B) ? 0x6B : 0x6A;
-  Wire.beginTransmission(address);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0 || Wire.requestFrom(address, length) != length) return false;
-  for (uint8_t i = 0; i < length; i++) data[i] = Wire.read();
-  return true;
-}
-
-bool initializeLiftSensor() {
-  if (!imuDetected) return false;
-  uint8_t ctrl5 = 0;
-  uint8_t ctrl7 = 0;
-  imuRead(0x06, &ctrl5, 1);
-  imuRead(0x08, &ctrl7, 1);
-  // ±4 g, 11 Hz low-power accelerometer, LPF enabled; gyroscope stays off.
-  const bool configured = imuWrite(0x03, 0x1E) && imuWrite(0x06, (ctrl5 & 0xF0) | 0x01) &&
-                          imuWrite(0x08, (ctrl7 & 0xFC) | 0x01);
-  Serial.printf("Lift sensor: %s\n", configured ? "ready" : "initialization failed");
-  return configured;
-}
-
-bool readAcceleration(float &x, float &y, float &z) {
-  uint8_t raw[6];
-  if (!imuReady || !imuRead(0x35, raw, sizeof(raw))) return false;
-  const int16_t rx = static_cast<int16_t>((raw[1] << 8) | raw[0]);
-  const int16_t ry = static_cast<int16_t>((raw[3] << 8) | raw[2]);
-  const int16_t rz = static_cast<int16_t>((raw[5] << 8) | raw[4]);
-  x = rx * (4.0f / 32768.0f);
-  y = ry * (4.0f / 32768.0f);
-  z = rz * (4.0f / 32768.0f);
-  return true;
 }
 
 bool rtcRead(struct tm &value) {
@@ -2301,7 +2247,10 @@ void changeSetting(int16_t x, int16_t y) {
   const uint8_t row = y >= 227;
   const uint8_t item = settingsGridPage * 4 + row * 2 + column;
 
-  if (item <= 5) {
+  // item == 3 (Wake Mode) is a locked placeholder now -- see
+  // drawSettingsTile()'s own call site for why -- so it's deliberately
+  // excluded here even though it still falls in the item <= 5 range.
+  if (item <= 5 && item != 3) {
     transitionSettingsView(static_cast<SettingsView>(item + 1), true);
   } else if (item == 6) {
     showingPlayerId = true;
@@ -2392,9 +2341,6 @@ void handleSettingsControlTap(int16_t x, int16_t y) {
       }
       changed = true;
     }
-  } else if (settingsView == SETTINGS_WAKE) {
-    if (y >= 121 && y < 169) { settings.wakeMode = 0; changed = true; }
-    if (y >= 190 && y < 238) { settings.wakeMode = 1; changed = true; }
   } else if (settingsView == SETTINGS_BOOT) {
     if (y >= 130 && y < 178) { settings.bootAnimationEnabled = true; changed = true; }
     if (y >= 199 && y < 247) { settings.bootAnimationEnabled = false; changed = true; }
@@ -2683,39 +2629,37 @@ void enterSleep() {
   sleepStarted = millis();
   animationFrame = false;
   panel->setBrightness(55);
+  // Touch reads stop entirely while sleeping (see loop()), so a touch that
+  // somehow was still down at the exact moment the idle timeout fired would
+  // otherwise never get its release processed, leaving stale coordinates
+  // for the next real touch to trip over on wake. Clearing it here means
+  // there's nothing left to resolve.
+  touchWasDown = false;
+  touchStartX = touchStartY = touchLastX = touchLastY = -1;
   drawSleep();
 }
 
 void turnScreenOff() {
   if (!sleeping || screenOff) return;
   screenOff = true;
-  imuBaselineReady = false;
   panel->setBrightness(0);
   panel->displayOff();
   digitalWrite(AUDIO_PA, LOW);
-  audioPaOn = false;
   setCpuFrequencyMhz(kIdleCpuMhz);
-  Serial.println("Display: off; lift and selected wake control remain active");
+  Serial.println("Display: off; boot key wake remains active");
 }
 
-void showIdleFromLift() {
-  if (!screenOff) return;
-  panel->displayOn();
-  panel->setBrightness(55);
-  screenOff = false;
-  sleepStarted = millis();
-  animationFrame = false;
-  drawSleep();
-  Serial.println("Wake: lift detected; showing idle screen");
-}
-
+// screenOff is now the one and only signal for "display and amp are
+// powered down" -- it used to also get cleared by a since-removed
+// lift-wake preview state without touching either of those, which is why
+// this used to need its own separate audioPaOn flag. With that gone,
+// screenOff and "was the amp cut" are always in lockstep again.
 void wakeUp() {
   setCpuFrequencyMhz(fullCpuMhz);
-  if (screenOff) panel->displayOn();
-  if (!audioPaOn) {
+  if (screenOff) {
+    panel->displayOn();
     digitalWrite(AUDIO_PA, HIGH);
     delay(20);  // same settle time initAudio() already waits after this pin
-    audioPaOn = true;
   }
   sleeping = false;
   screenOff = false;
@@ -2727,26 +2671,11 @@ void wakeUp() {
   drawHome();
 }
 
-void pollLiftWake(uint32_t now) {
-  if (!screenOff || !imuReady || now - lastImuRead < 90) return;
-  lastImuRead = now;
-  float x, y, z;
-  if (!readAcceleration(x, y, z)) return;
-  if (!imuBaselineReady) {
-    lastAccelX = x; lastAccelY = y; lastAccelZ = z;
-    imuBaselineReady = true;
-    return;
-  }
-  const float movement = fabsf(x - lastAccelX) + fabsf(y - lastAccelY) + fabsf(z - lastAccelZ);
-  lastAccelX = x; lastAccelY = y; lastAccelZ = z;
-  if (movement > 0.42f) showIdleFromLift();
-}
-
 void pollBootWake(uint32_t now) {
   if (now - lastBootRead < 25) return;
   lastBootRead = now;
   const bool down = digitalRead(0) == LOW;
-  if (down && !bootWasDown && sleeping && settings.wakeMode == 1) wakeUp();
+  if (down && !bootWasDown && sleeping) wakeUp();
   bootWasDown = down;
 }
 
@@ -3090,30 +3019,25 @@ void setup() {
         Arduino_IIC_Touch::Device_Mode::TOUCH_DEVICE_INTERRUPT_PERIODIC);
   }
   pinMode(0, INPUT_PULLUP);
-  imuReady = initializeLiftSensor();
   nextBlink = millis() + 2200;
   lastMinute = lastInteraction = lastAnimation = millis();
 }
 
 void loop() {
   // Deep idle (asleep, screen off -- the common state once this is riding
-  // in a pocket) has nothing that needs sub-25ms responsiveness: touch is
-  // the wake source and already gated to its own 25ms poll below, and
-  // pollLiftWake() gates itself to the accelerometer's own ~90ms refresh.
-  // Rather than a plain delay() (which only lets the idle task WFI between
-  // FreeRTOS ticks), this actually clock- and power-gates the chip for the
-  // same ~15ms window -- real light sleep, not just an idle CPU. It's safe
-  // to reach for unprompted here specifically because WiFi and BLE are
-  // always fully torn down before this state is ever entered (both only
-  // init on demand, see FamiliarBattleService::beginRadio()'s own comment),
-  // so there's no radio PM lock that could block or get confused by sleep
+  // in a pocket) has nothing that needs sub-25ms responsiveness at all
+  // anymore: touch can't wake it (the touch read below is skipped entirely
+  // while sleeping) and there's no accelerometer polling running in this
+  // state either -- the only thing still checked on a timer is the boot
+  // key, itself gated to its own 25ms poll in pollBootWake(). Rather than a
+  // plain delay() (which only lets the idle task WFI between FreeRTOS
+  // ticks), this actually clock- and power-gates the chip for the same
+  // ~15ms window -- real light sleep, not just an idle CPU. It's safe to
+  // reach for unprompted here specifically because WiFi and BLE are always
+  // fully torn down before this state is ever entered (both only init on
+  // demand, see FamiliarBattleService::beginRadio()'s own comment), so
+  // there's no radio PM lock that could block or get confused by sleep
   // entry the way there would be on a device that leaves a radio connected.
-  // Timer-only wake source on purpose: TP_INT (pin_config.h) already drives
-  // the touch driver's own interrupt (see the Arduino_CST816x construction
-  // above), and wiring the same pin into esp_sleep_enable_gpio_wakeup() too
-  // risked interacting with that in ways I can't verify without the board
-  // in hand -- worth revisiting once this simpler version is confirmed
-  // solid, since it would cut wake latency from "next 15ms tick" to instant.
   if (sleeping && screenOff) {
     esp_sleep_enable_timer_wakeup(15000);
     esp_light_sleep_start();
@@ -3158,7 +3082,6 @@ void loop() {
   }
 
   if (sleeping && !screenOff && now - sleepStarted >= 10000) turnScreenOff();
-  pollLiftWake(now);
   pollBootWake(now);
 
   if (sleeping && !screenOff && now - lastAnimation >= 900) {
@@ -3197,7 +3120,11 @@ void loop() {
     if (currentPage == PAGE_GENOME_LAB) drawHome();
   }
 
-  if (now - lastTouchRead < 25) return;
+  // Touch can't wake it anymore (see pollBootWake()/the sleeping branch
+  // below), so there's nothing for a touch read to accomplish at all while
+  // asleep -- skip the I2C round trip entirely rather than reading data
+  // that's guaranteed to be thrown away.
+  if (sleeping || now - lastTouchRead < 25) return;
   lastTouchRead = now;
   const int32_t fingers = touch->IIC_Read_Device_Value(
       Arduino_IIC_Touch::Value_Information::TOUCH_FINGER_NUMBER);
@@ -3211,11 +3138,9 @@ void loop() {
     if (!touchWasDown) {
       touchWasDown = true;
       touchStartedAt = now;
-      if (sleeping) {
-        touchStartX = touchStartY = -1;
-        if (settings.wakeMode == 0) wakeUp();
-        return;  // The wake touch never activates a button.
-      }
+      // sleeping is unreachable here -- the whole touch block above is
+      // skipped while asleep (touch can't wake it anymore, see
+      // pollBootWake()), so nothing below needs to handle that case.
       lastInteraction = now;
       touchStartX = touchLastX = x;
       touchStartY = touchLastY = y;

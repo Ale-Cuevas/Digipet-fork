@@ -16,8 +16,7 @@ tools/sim/render.sh settings /tmp/settings.png        # home grid, page 1/2
 tools/sim/render.sh settings2 /tmp/settings2.png      # home grid, page 2/2
 tools/sim/render.sh settings-brightness /tmp/b.png    # any settingsView sub-view:
 tools/sim/render.sh settings-idle /tmp/i.png          #   brightness|idle|volume|
-tools/sim/render.sh settings-volume /tmp/v.png        #   wake|theme|boot
-tools/sim/render.sh settings-wake /tmp/w.png
+tools/sim/render.sh settings-volume /tmp/v.png        #   theme|boot
 tools/sim/render.sh settings-theme /tmp/t.png
 tools/sim/render.sh settings-boot /tmp/o.png
 tools/sim/render.sh genomelab /tmp/genomelab.png
@@ -86,7 +85,7 @@ resulting canvas to a PPM (converted to PNG by `render.sh` via Pillow).
 
 Currently covers Companion (all 5 stages and all 5 body types' procedural
 creature rendering), Status, the egg-stage Companion screen (all 10 egg
-lineages), Settings (both home grid pages and all 6 settingsView
+lineages), Settings (both home grid pages and all 5 settingsView
 sub-views), Genome Lab, and Battle's Battling/Result/opponent-picker
 states (drawBattlingLayout/drawBattleResultsPage/drawOpponentRow/
 drawBattleButton -- already parameter-driven rather than reading the live

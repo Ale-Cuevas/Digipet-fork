@@ -947,13 +947,8 @@ void drawSettingsIcon(uint8_t item, int16_t cx, int16_t cy, uint16_t color) {
       display->drawCircle(cx + 3, cy, 17, color);
       display->drawCircle(cx + 3, cy, 25, color);
       break;
-    case 3:  // wake
-      display->drawCircle(cx, cy, 24, color);
-      display->fillCircle(cx, cy, 7, color);
-      display->drawLine(cx, cy - 8, cx, cy - 27, color);
-      display->drawLine(cx - 20, cy + 16, cx - 29, cy + 23, color);
-      display->drawLine(cx + 20, cy + 16, cx + 29, cy + 23, color);
-      break;
+    // case 3 (wake) retired along with Wake Mode -- locked tiles never call
+    // this, so there's no longer a caller for it.
     case 4:  // theme palette
       display->drawCircle(cx, cy, 25, color);
       display->fillCircle(cx - 10, cy - 8, 5, COLOR_CYAN);
@@ -985,18 +980,21 @@ void drawSettingsIcon(uint8_t item, int16_t cx, int16_t cy, uint16_t color) {
 
 
 void drawSettingsTile(uint8_t item, int16_t x, int16_t y,
-                      const char *label, const char *value) {
-  const uint16_t accent = item & 1 ? COLOR_PURPLE : COLOR_CYAN;
+                      const char *label, const char *value, bool locked) {
+  const uint16_t accent = locked ? COLOR_MUTED : (item & 1 ? COLOR_PURPLE : COLOR_CYAN);
+  const uint16_t fill = locked ? scaleRgb565(COLOR_CARD, 55) : COLOR_CARD;
   drawPanelGlow(x, y, 160, 137, 20, accent);
-  display->fillRoundRect(x, y, 160, 137, 20, COLOR_CARD);
+  display->fillRoundRect(x, y, 160, 137, 20, fill);
   display->drawRoundRect(x, y, 160, 137, 20, accent);
-  drawSettingsIcon(item, x + 80, y + 43, COLOR_MINT);
+  // Same "locked tile gets no icon at all" convention as drawActionTile()'s
+  // own reserved-for-later tiles.
+  if (!locked) drawSettingsIcon(item, x + 80, y + 43, COLOR_MINT);
   // Same label-is-size-2/value-is-size-1 "title/subtitle" role split as
   // drawActionTile() -- see that function's own comment. "BOOT EFFECT",
   // the longest label here, is 132px at size 2 starting from x+16 in a
   // 160px-wide tile -- fits with a few px to spare before the edge.
   display->setTextSize(2);
-  display->setTextColor(COLOR_TEXT);
+  display->setTextColor(locked ? COLOR_MUTED : COLOR_TEXT);
   display->setCursor(x + 16, y + 82);
   display->print(label);
   display->setTextSize(1);
@@ -1100,9 +1098,6 @@ void drawSettingsControlPage() {
   } else if (settingsView == SETTINGS_VOLUME) {
     for (uint8_t i = 0; i < 5; ++i)
       drawChoiceRow(VOLUME_LABELS[i], 78 + i * 57, settings.volumeIndex == i);
-  } else if (settingsView == SETTINGS_WAKE) {
-    drawChoiceRow("TOUCH TO WAKE", 121, settings.wakeMode == 0);
-    drawChoiceRow("BOOT KEY TO WAKE", 190, settings.wakeMode == 1);
   } else if (settingsView == SETTINGS_THEME) {
     for (uint8_t i = 0; i < 5; ++i) {
       const int16_t y = 78 + i * 57;
@@ -1135,7 +1130,11 @@ void drawSettingsPage() {
     drawSettingsTile(0, 18, 78, "BRIGHTNESS", brightness);
     drawSettingsTile(1, 190, 78, "IDLE TIMER", SLEEP_LABELS[settings.sleepIndex]);
     drawSettingsTile(2, 18, 227, "VOLUME", VOLUME_LABELS[settings.volumeIndex]);
-    drawSettingsTile(3, 190, 227, "WAKE MODE", WAKE_LABELS[settings.wakeMode]);
+    // Wake Mode was retired: touch no longer wakes the device at all (only
+    // the boot key does, see main.cpp's pollBootWake()), so there's no
+    // longer a choice here to present. Same locked-placeholder treatment
+    // the Status page's own reserved tiles use.
+    drawSettingsTile(3, 190, 227, "LOCKED", "COMING SOON", /*locked=*/true);
   } else {
     drawSettingsTile(4, 18, 78, "THEME", THEME_LABELS[settings.themeIndex]);
     drawSettingsTile(5, 190, 78, "BOOT EFFECT", settings.bootAnimationEnabled ? "ENABLED" : "DISABLED");

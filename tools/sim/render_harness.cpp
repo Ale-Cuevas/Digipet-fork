@@ -48,7 +48,6 @@ bool animationFrame = false;
 DeviceSettings settings{};
 const char *SLEEP_LABELS[] = {"15 SEC", "30 SEC", "1 MIN", "2 MIN"};
 const char *VOLUME_LABELS[] = {"MUTE", "LOW", "MEDIUM", "HIGH", "MAX"};
-const char *WAKE_LABELS[] = {"TOUCH", "BOOT KEY"};
 const char *THEME_LABELS[] = {"AUTO // PET", "CYBER MINT", "AMBER CORE",
                               "VIOLET LINK", "MONO SIGNAL"};
 uint8_t settingsGridPage = 0;
@@ -115,7 +114,7 @@ namespace {
 
 const char *kPageNames =
     "companion|status|status-actions[2]|egg|settings|settings2|"
-    "settings-brightness|settings-idle|settings-volume|settings-wake|"
+    "settings-brightness|settings-idle|settings-volume|"
     "settings-theme|settings-boot|genomelab|"
     "battle-idle-stats|battle-idle-actions|"
     "battle-fight[-highstats|-lowhp|-submitted|-fleearmed|-nogenome]|"
@@ -130,7 +129,6 @@ void seedTestSettings() {
   settings.soundEnabled = true;
   settings.bootAnimationEnabled = true;
   settings.volumeIndex = 3;
-  settings.wakeMode = 0;
   settings.themeIndex = 0;
 }
 
@@ -245,7 +243,6 @@ int main(int argc, char **argv) {
     if (strcmp(sub, "brightness") == 0) settingsView = SETTINGS_BRIGHTNESS;
     else if (strcmp(sub, "idle") == 0) settingsView = SETTINGS_IDLE;
     else if (strcmp(sub, "volume") == 0) settingsView = SETTINGS_VOLUME;
-    else if (strcmp(sub, "wake") == 0) settingsView = SETTINGS_WAKE;
     else if (strcmp(sub, "theme") == 0) settingsView = SETTINGS_THEME;
     else if (strcmp(sub, "boot") == 0) settingsView = SETTINGS_BOOT;
     else {
