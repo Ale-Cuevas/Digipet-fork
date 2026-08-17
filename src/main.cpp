@@ -2960,6 +2960,14 @@ void setup() {
   if (resumingFromDeepIdle) {
     pinMode(0, INPUT_PULLUP);
     if (digitalRead(0) != LOW) {
+      // TEMPORARY debug heartbeat -- the whole point of this path is to
+      // cost nothing, so it normally has zero Serial output, which means
+      // no visibility into whether it's cycling healthily or dying on its
+      // own before a real wake is ever attempted. Pull this back out once
+      // the wake-after-deep-sleep hang is found.
+      Serial.begin(115200);
+      Serial.println("idle check: not pressed, back to sleep");
+      Serial.flush();
       enterDeepIdle();  // never returns
     }
     // Boot key is down: a real wake. Falls through to the rest of setup(),
