@@ -1184,100 +1184,6 @@ void presentUpdatePage(const char *status, int progress) {
   }
 }
 
-// One row of a scanned opponent: stage/level identity plus a 3-bar signal
-// strength readout from RSSI. No creature portrait here -- their genome
-// hasn't been exchanged yet at this point, only their HELLO/advertisement.
-void drawBattlePage() {
-  if (showingBattleResults) {
-    drawBattleResultsPage(battle.scanResults(), battleResultsPage);
-    return;
-  }
-
-  paintPageBackdrop();
-  drawCentered("PVP", 16, 3, COLOR_MINT);
-
-  const FamiliarBattleState state = battle.state();
-  // Idle now draws one of its own two full-screen sub-views (see
-  // battleShowingActions' own comment in ui_pages.h) instead of a compact
-  // header + portrait + buttons all on one screen -- only the three
-  // transient connecting-ish states below still want the old compact
-  // one-liner for context while they wait.
-  const bool showsCompactHeader = state == FamiliarBattleState::Scanning ||
-                                  state == FamiliarBattleState::Hosting ||
-                                  state == FamiliarBattleState::Connecting;
-  if (showsCompactHeader) {
-    display->setTextSize(1);
-    display->setTextColor(COLOR_CYAN);
-    display->setCursor(24, 51);
-    // Item bonuses (pet.bonusHp/Attack/Defense) fold in here for display --
-    // see useItem()'s own comment on why they don't (yet) travel over BLE
-    // into what a real opponent's device computes for these same numbers.
-    display->printf("LV 5  HP %u  ATK %u  DEF %u",
-                    FamiliarBattleService::deriveMaxHp(5) + pet.bonusHp,
-                    FamiliarBattleService::deriveAttack(5, pet.stage) + pet.bonusAttack,
-                    FamiliarBattleService::deriveDefense(5, pet.stage) + pet.bonusDefense);
-    display->setTextColor(COLOR_MUTED);
-    display->setCursor(24, 64);
-    display->printf("RECORD %luW-%luL", (unsigned long)battleStats.wins,
-                    (unsigned long)battleStats.losses);
-  }
-
-  if (state == FamiliarBattleState::Idle) {
-    if (battleShowingActions) {
-      drawBattleActionsView();
-    } else {
-      drawBattleStatsView();
-    }
-  } else if (state == FamiliarBattleState::Scanning) {
-    // Effectively unreachable today (beginFind() blocks for its whole scan
-    // window before returning, so the UI never renders mid-scan -- see the
-    // dedicated screen drawn in handleBattleTap instead) but handled here
-    // too rather than silently falling through to the battling layout.
-    const PetPalette palette = paletteForGenome(pet.genome);
-    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 184, 70, palette.glow);
-    display->drawCircle(184, 184, 82, COLOR_CYAN);
-    drawCentered("SCANNING", 288, 2, COLOR_TEXT);
-    drawCentered(battle.status().c_str(), 320, 1, COLOR_MUTED);
-  } else if (state == FamiliarBattleState::Hosting ||
-             state == FamiliarBattleState::Connecting) {
-    const PetPalette palette = paletteForGenome(pet.genome);
-    display->drawCircle(184, 184, 72, palette.glow);
-    display->drawCircle(184, 184, 51, palette.secondary);
-    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 184, 60, palette.glow);
-    drawCentered(state == FamiliarBattleState::Hosting ? "SIGNAL OPEN" : "HANDSHAKE",
-                 278, 2, COLOR_TEXT);
-    drawCentered(battle.status().c_str(), 310, 1, COLOR_MUTED);
-    drawCentered("TAP BELOW TO CANCEL", 367, 1, COLOR_WARNING);
-  } else if (state == FamiliarBattleState::Exchanged) {
-    const PetPalette palette = paletteForGenome(pet.genome);
-    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 170, 70, palette.glow);
-    drawCentered("FRIEND ADDED", 260, 2, COLOR_MINT);
-    drawCentered(battle.status().c_str(), 296, 1, COLOR_MUTED);
-    drawCentered("TAP TO RETURN", 340, 1, COLOR_CYAN);
-  } else {
-    // The two most recent log lines ("you did this, they did that") rather
-    // than one line under a big decorative VS panel.
-    const auto &log = battle.log();
-    // Truncated tighter than the old single-line 42 chars now that the log
-    // renders at text size 2 -- the addLog() messages themselves were also
-    // shortened to fit comfortably within this.
-    const String line2 = log.empty() ? String("CHOOSE YOUR MOVE")
-                                     : log.back().substring(0, 24);
-    const String line1 = log.size() >= 2 ? log[log.size() - 2].substring(0, 24) : String("");
-    if (fleeArmed && millis() >= fleeArmedUntil) fleeArmed = false;
-    PetGenome opponentGenome{};
-    const bool haveOpponentGenome = battle.opponentGenomeCodeAvailable() &&
-        decodePetGenome(battle.opponentGenomeCode(), opponentGenome);
-    drawBattlingLayout(battle.myHp(), battle.myMaxHp(), battle.opponentHp(),
-                       battle.opponentMaxHp(), battle.opponent().level,
-                       battle.negotiatedCapabilities(), line1.c_str(), line2.c_str(),
-                       state == FamiliarBattleState::Result, battle.myMoveSubmitted(),
-                       fleeArmed, battle.opponentGenomeCodeAvailable(), battleGenomeCopied,
-                       haveOpponentGenome ? &opponentGenome : nullptr);
-  }
-  drawPageDots(PAGE_BATTLE);
-}
-
 // A slide-down banner for `message`/showToast(), drawn on top of whichever
 // page just rendered. There's no alpha channel on a 16-bit panel, so unlike
 // the boot sequence's color fades this only ever moves -- slide in, hold,
@@ -1331,11 +1237,11 @@ void drawToastOverlay() {
 // last, on top of the freshly-composed page, regardless of which path
 // rendered it.
 void drawActivePage(Page page) {
-  if (page == PAGE_COMPANION) drawCompanionPage();
-  else if (page == PAGE_STATUS) drawStatusPage();
-  else if (page == PAGE_BATTLE) drawBattlePage();
-  else if (page == PAGE_SETTINGS) drawSettingsPage();
-  else drawGenomeLabPage();
+  // PAGE_SETTINGS is the one genuinely generic page (console-owned); every
+  // other page's content is a game module's own -- see gameDrawPage()'s
+  // own comment in game_module.h.
+  if (page == PAGE_SETTINGS) drawSettingsPage();
+  else gameDrawPage(page);
   drawToastOverlay();
 }
 
@@ -1716,7 +1622,7 @@ void transitionBattleView(bool showActions) {
   if (showActions == battleShowingActions) return;
   if (!transitionsReady) {
     battleShowingActions = showActions;
-    drawBattlePage();
+    gameDrawPage(PAGE_BATTLE);
     return;
   }
   renderPageToCanvas(PAGE_BATTLE, pageCanvasA);
@@ -1756,7 +1662,7 @@ void presentBattlePage() {
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(),
                               LCD_WIDTH, LCD_HEIGHT);
   } else {
-    drawBattlePage();
+    gameDrawPage(PAGE_BATTLE);
   }
 }
 
@@ -1834,28 +1740,6 @@ void changeSetting(int16_t x, int16_t y) {
         [](const char *status, int progress) { presentUpdatePage(status, progress); });
     presentUpdatePage(otaResultMessage(otaResult), -1);
     lastInteraction = millis();
-  }
-}
-
-// Same tile-grid hit-test shape as changeSetting() just above, applied to
-// the Status page's action grid (see statusShowingActions' own comment in
-// ui_pages.h) instead of Settings' home grid -- one page's worth of tiles
-// here, not two, so no settingsGridPage-style page offset is needed.
-void handleStatusGridTap(int16_t x, int16_t y) {
-  if (y < 78 || y >= 364) return;
-  const uint8_t column = x >= LCD_WIDTH / 2;
-  const uint8_t row = y >= 227;
-  const uint8_t tile = statusActionsPage * 4 + row * 2 + column;
-  if (tile == 3) {
-    showingReconLog = true;
-    presentOverlayEntrance(PAGE_STATUS, drawReconLogPage);
-  } else if (tile == 4) {
-    showingItems = true;
-    presentOverlayEntrance(PAGE_STATUS, drawItemsPage);
-  } else if (tile >= 5) {
-    // Reserved-for-later locked tiles -- nothing to do yet.
-  } else {
-    performAction(tile);
   }
 }
 
@@ -2340,82 +2224,22 @@ void loop() {
         touchStartX = touchStartY = touchLastX = touchLastY = -1;
         return;
       }
-      if (currentPage == PAGE_STATUS && abs(deltaY) > 55 && abs(deltaY) > abs(deltaX)) {
-        // Three linear steps -- summary, actions page 1, actions page 2 --
-        // swiped through in sequence, same shape Settings' HOME grid uses
-        // for its own two pages, just with the summary as an extra step
-        // before the grid rather than the grid being the whole page.
-        // Bounded at each end (swipe up already on page 2, or down already
-        // on the summary) rather than wrapping.
-        // Every branch below -- including the two bounded ends, which
-        // change nothing -- redraws unconditionally. A touch-down that
-        // landed on a grid tile just before this swipe was recognized
-        // already drew flashPressedHighlight()'s highlight straight to the
-        // live panel (see that function's own comment on why it bypasses
-        // the canvas pipeline); if this gesture then resolves to a bounded
-        // no-op, nothing else would ever repaint over that highlight, and
-        // it would sit there -- looking exactly like a corrupted button --
-        // until some unrelated full redraw happened to land on this same
-        // page later.
-        if (deltaY < 0) {
-          if (!statusShowingActions) {
-            playTone(988, 30, 30);
-            transitionStatusView(true);
-          } else if (statusActionsPage == 0) {
-            playTone(988, 30, 30);
-            transitionStatusActionsGrid(1);
-          } else {
-            presentCoherentPageFrame(PAGE_STATUS);
-          }
-        } else {
-          if (statusShowingActions && statusActionsPage == 1) {
-            playTone(784, 30, 30);
-            transitionStatusActionsGrid(0);
-          } else if (statusShowingActions) {
-            playTone(784, 30, 30);
-            transitionStatusView(false);
-          } else {
-            presentCoherentPageFrame(PAGE_STATUS);
-          }
-        }
-        touchStartX = touchStartY = touchLastX = touchLastY = -1;
-        return;
-      }
-      if (currentPage == PAGE_BATTLE && !showingBattleResults &&
-          battle.state() == FamiliarBattleState::Idle &&
+      // Vertical swipe on Status/Battle -- both delegate to gameHandleSwipe(),
+      // which keeps the exact original PAGE_STATUS-vs-PAGE_BATTLE bodies
+      // (and, within PAGE_BATTLE, the results-vs-idle distinction the two
+      // original separate blocks here used to encode via their own outer
+      // guards); merging those guards into one "vertical swipe on either
+      // page" check changes nothing observable, since neither original
+      // block did anything when its own sub-condition didn't hold either.
+      if ((currentPage == PAGE_STATUS || currentPage == PAGE_BATTLE) &&
           abs(deltaY) > 55 && abs(deltaY) > abs(deltaX)) {
-        // Same two-sub-view swipe shape as PAGE_STATUS above, including the
-        // "always redraw, even the bounded ends" reasoning in its own
-        // comment just above.
-        if (deltaY < 0 && !battleShowingActions) {
-          playTone(988, 30, 30);
-          transitionBattleView(true);
-        } else if (deltaY > 0 && battleShowingActions) {
-          playTone(784, 30, 30);
-          transitionBattleView(false);
-        } else {
-          presentCoherentPageFrame(PAGE_BATTLE);
-        }
+        gameHandleSwipe(currentPage, deltaX, deltaY);
         touchStartX = touchStartY = touchLastX = touchLastY = -1;
         return;
       }
-      if (currentPage == PAGE_BATTLE && showingBattleResults &&
-          abs(deltaY) > 55 && abs(deltaY) > abs(deltaX)) {
-        const uint8_t totalPages = max<uint8_t>(1,
-            (battle.scanResults().size() + kBattleResultsPerPage - 1) /
-                kBattleResultsPerPage);
-        if (deltaY < 0 && battleResultsPage + 1 < totalPages) {
-          ++battleResultsPage;
-          playTone(988, 30, 30);
-          presentBattlePage();
-        } else if (deltaY > 0 && battleResultsPage > 0) {
-          --battleResultsPage;
-          playTone(784, 30, 30);
-          presentBattlePage();
-        }
-        touchStartX = touchStartY = touchLastX = touchLastY = -1;
-        return;
-      }
+      // Horizontal page-to-page swipe -- a console mechanism (transitionToPage
+      // works on any Page), gated on one piece of live game state (a BLE
+      // battle link shouldn't be interrupted by accidentally paging away).
       const bool battleLinkActive = currentPage == PAGE_BATTLE &&
                                     (battle.state() != FamiliarBattleState::Idle ||
                                      showingBattleResults);
@@ -2430,42 +2254,10 @@ void loop() {
           playTone(784, 30, 35);
           transitionToPage(static_cast<Page>(currentPage - 1), 1);
         }
-      } else if (currentPage == PAGE_COMPANION && touchDuration < 900 &&
-                 abs(deltaX) < 30 && abs(deltaY) < 30 &&
-                 touchStartX >= 55 && touchStartX <= 313 &&
-                 touchStartY >= 90 && touchStartY <= 358) {
-        genomeProfileReturnPage = PAGE_COMPANION;
-        showingGenomeProfile = true;
-        // Always opens on the identity sub-view -- see transitionStatusView()'s
-        // own comment on why landing wherever it was last left would be a
-        // worse surprise than always starting at the top.
-        genomeProfileShowingData = false;
-        presentOverlayEntrance(PAGE_COMPANION, drawGenomeProfilePage);
-      } else if (currentPage == PAGE_STATUS && statusShowingActions) {
-        handleStatusGridTap(touchLastX, touchLastY);
       } else if (currentPage == PAGE_SETTINGS) {
         changeSetting(touchLastX, touchLastY);
-      } else if (currentPage == PAGE_GENOME_LAB && touchLastY >= 374) {
-        const uint8_t mode = min<uint8_t>(3, touchLastX / 119 + 1);
-        if (mode > 1 && !hasCopiedGenome) {
-          strcpy(genomeTransferStatus, "IMPORT A GENOME FIRST");
-          playTone(196, 100, 35);
-        } else if (newEggConfirmation && pendingHatchMode == mode &&
-                   millis() < newEggConfirmationUntil) {
-          beginNewEgg(mode);
-          transitionToPage(PAGE_COMPANION, 1);
-        } else {
-          newEggConfirmation = true;
-          pendingHatchMode = mode;
-          newEggConfirmationUntil = millis() + 6000;
-          playTone(330, 90, 38);
-        }
-        drawHome();
-      } else if (currentPage == PAGE_BATTLE && battle.state() == FamiliarBattleState::Idle &&
-                 battleShowingActions) {
-        handleBattleGridTap(touchLastX, touchLastY);
-      } else if (currentPage == PAGE_BATTLE) {
-        handleBattleTap(touchLastX, touchLastY);
+      } else {
+        gameHandleTap(currentPage, touchLastX, touchLastY, deltaX, deltaY, touchDuration);
       }
     }
     touchStartX = touchStartY = touchLastX = touchLastY = -1;

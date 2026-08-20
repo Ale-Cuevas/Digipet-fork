@@ -37,7 +37,13 @@ void gameTick(uint32_t nowMs);
 // and calls this for everything else.
 void gameDrawPage(Page page);
 
-void gameHandleTap(Page page, int16_t x, int16_t y);
+// dx/dy/touchDuration are the same press-to-release deltas/duration
+// loop()'s touch-release handler already computes -- several per-page tap
+// branches need them to distinguish a genuine short tap from a long-press
+// or a small drag (e.g. the Companion page's tap-the-creature-for-Genome-
+// Profile gesture), so they're passed through rather than re-derived.
+void gameHandleTap(Page page, int16_t x, int16_t y, int16_t dx, int16_t dy,
+                   uint32_t touchDuration);
 void gameHandleSwipe(Page page, int16_t dx, int16_t dy);
 
 // True whenever a game-owned full-screen overlay (Rivals/Recon Log/
