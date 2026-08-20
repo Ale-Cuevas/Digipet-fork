@@ -364,11 +364,14 @@ RTC_DATA_ATTR float rtcBatteryDrainPercentPerHour = 0.0f;
 // between awake and asleep.
 void updateBatteryTimeEstimate() {
   if (!pmuDetected || !clockValid) {
+    Serial.printf("Battery estimate: skipped (pmuDetected=%d clockValid=%d)\n",
+                  pmuDetected, clockValid);
     batteryTimeEstimateValid = false;
     return;
   }
   struct tm nowTm{};
   if (!rtcRead(nowTm)) {
+    Serial.println("Battery estimate: skipped (RTC read failed)");
     batteryTimeEstimateValid = false;
     return;
   }
@@ -379,6 +382,7 @@ void updateBatteryTimeEstimate() {
     // yet, just establish the starting point.
     rtcBatteryTransitionPercent = batteryPercent;
     rtcBatteryTransitionEpoch = nowEpoch;
+    Serial.printf("Battery estimate: first sample this power-on (%u%%)\n", batteryPercent);
   } else if (batteryPercent != rtcBatteryTransitionPercent) {
     const float deltaHours = (nowEpoch - rtcBatteryTransitionEpoch) / 3600.0f;
     if (deltaHours > 0.01f) {  // guards a clock rollback/glitch, not real usage
@@ -394,9 +398,18 @@ void updateBatteryTimeEstimate() {
       rtcBatteryDrainPercentPerHour = rtcBatteryDrainPercentPerHour == 0.0f
           ? instantRate
           : rtcBatteryDrainPercentPerHour * 0.7f + instantRate * 0.3f;
+      Serial.printf("Battery estimate: transition %u%%->%u%% over %.2fh, "
+                    "instant=%.2f%%/h, smoothed=%.2f%%/h\n",
+                    rtcBatteryTransitionPercent, batteryPercent, deltaHours, instantRate,
+                    rtcBatteryDrainPercentPerHour);
     }
     rtcBatteryTransitionPercent = batteryPercent;
     rtcBatteryTransitionEpoch = nowEpoch;
+  } else {
+    const float hoursSinceAnchor = (nowEpoch - rtcBatteryTransitionEpoch) / 3600.0f;
+    Serial.printf("Battery estimate: still %u%%, %.2fh since last transition, "
+                  "rate=%.2f%%/h\n",
+                  batteryPercent, hoursSinceAnchor, rtcBatteryDrainPercentPerHour);
   }
 
   batteryTimeEstimateValid = !batteryCharging && rtcBatteryDrainPercentPerHour > 0.01f;
