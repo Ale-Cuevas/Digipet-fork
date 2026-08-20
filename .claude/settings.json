@@ -3,7 +3,15 @@
     "allow": [
       "Bash(git add *)",
       "Bash(git commit -q -m 'Move pet_genome and familiar_battle_rules into game/vpet/ *)",
-      "Bash(git commit -q -m 'Move vpet'\\\\''s PetState/BattleStats/ReconLog/FriendsList/Inventory and ui_pages.cpp into game/vpet/ *)"
+      "Bash(git commit -q -m 'Move vpet'\\\\''s PetState/BattleStats/ReconLog/FriendsList/Inventory and ui_pages.cpp into game/vpet/ *)",
+      "Bash(git commit -q -m 'Add the console/game seam header and a placeholder game_vpet.cpp *)",
+      "Bash(sed -i '2741,2994d' src/main.cpp)",
+      "Bash(sed -i '2403,2659d' src/main.cpp)",
+      "Bash(sed -i '1518,1557d' src/main.cpp)",
+      "Bash(sed -i '1128,1230d' src/main.cpp)",
+      "Bash(sed -i '842,1100d' src/main.cpp)",
+      "Bash(ls /dev/ttyACM* 2>&1)",
+      "Read(//dev/**)"
     ]
   }
 }
