@@ -45,6 +45,8 @@ uint8_t i2cDeviceCount = 7;
 bool batteryCharging = false;
 uint8_t batteryPercent = 82;
 uint16_t batteryVoltageMv = 3980;
+bool batteryTimeEstimateValid = true;
+uint32_t batteryMinutesRemaining = 14 * 60 + 20;  // ~14H, exercises the formatter
 
 bool animationFrame = false;
 

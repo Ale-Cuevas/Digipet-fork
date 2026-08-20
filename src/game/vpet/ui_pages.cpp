@@ -836,8 +836,21 @@ void drawCompanionPage() {
 }
 
 
+// Formats batteryMinutesRemaining as a short "~14H"/"~2D" label -- day
+// granularity once it's multi-day, since a drain-rate estimate isn't
+// precise enough to be worth an hour figure past that point.
+void formatBatteryTimeRemaining(char *out, size_t outSize) {
+  if (batteryMinutesRemaining < 60) {
+    snprintf(out, outSize, "~%luM", (unsigned long)batteryMinutesRemaining);
+  } else if (batteryMinutesRemaining < 48 * 60) {
+    snprintf(out, outSize, "~%luH", (unsigned long)(batteryMinutesRemaining / 60));
+  } else {
+    snprintf(out, outSize, "~%luD", (unsigned long)(batteryMinutesRemaining / (24 * 60)));
+  }
+}
+
 // The stats-summary sub-view (statusShowingActions == false) -- identity,
-// the 4 stat bars, and hardware diagnostics. This is everything the old
+// the 4 stat bars, and battery status. This is everything the old
 // single-view Status page showed except its FEED/PLAY/TRAIN row, which
 // moved into the action grid below (see drawStatusActionsView()) once
 // FEED stopped being an instant tap and started being a several-second
@@ -858,34 +871,35 @@ void drawStatusSummaryView() {
   drawStatRow(ICON_ENERGY, pet.energy, 174);
   drawStatRow(ICON_HEALTH, pet.health, 220);
 
+  // Used to be a 2x2 IMU/RTC/BATT/SOUND hardware-diagnostics grid; IMU
+  // isn't used by anything in this app and RTC/SOUND failures already show
+  // up functionally (no clock, no sound) even without a status line here,
+  // so this card is battery-only now -- percentage (row 1, also the
+  // charging cue via color, same threshold-based scheme the old BATT slot
+  // used) and, on row 2, whichever of "currently charging" or "estimated
+  // time left" is actually relevant right now. All 4 hardware checks stay
+  // in the Serial boot log (detectHardware(), main.cpp) either way.
   drawPanelGlow(25, 251, 318, 91, 18, COLOR_CYAN);
   display->fillRoundRect(25, 251, 318, 91, 18, COLOR_CARD);
-  display->setTextSize(2);
-  display->setCursor(45, 265);
-  display->setTextColor(imuDetected ? COLOR_MINT : COLOR_DANGER);
-  display->print(imuDetected ? "IMU OK" : "IMU --");
-  display->setCursor(195, 265);
-  display->setTextColor(rtcDetected ? COLOR_MINT : COLOR_DANGER);
-  display->print(rtcDetected ? "RTC OK" : "RTC --");
-  display->setCursor(45, 294);
-  // Was a plain "PWR OK/--" (pmuDetected on its own); now that pmuDetected
-  // actually means "AXP2101 PMU responding" (see main.cpp's
-  // detectHardware()), this slot can show the number it exists to report
-  // instead of just a yes/no. The label itself switches to CHG while
-  // charging rather than leaving that as a color-only cue (cyan, matching
-  // the panel's own cyan glow) -- otherwise mint/danger by level, same
-  // low-battery threshold as batteryPercent's other reader would use, if
-  // there ever is one.
-  char battLabel[10];
-  snprintf(battLabel, sizeof(battLabel), "%s %u%%", batteryCharging ? "CHG" : "BATT",
-           batteryPercent);
-  display->setTextColor(!pmuDetected ? COLOR_DANGER
-                        : batteryCharging ? COLOR_CYAN
-                        : batteryPercent <= 15 ? COLOR_DANGER : COLOR_MINT);
-  display->print(pmuDetected ? battLabel : "PWR --");
-  display->setCursor(195, 294);
-  display->setTextColor(codecDetected ? COLOR_MINT : COLOR_DANGER);
-  display->print(codecDetected ? "SOUND OK" : "SOUND --");
+  char battLine[16];
+  snprintf(battLine, sizeof(battLine), "BATTERY %u%%", batteryPercent);
+  drawCentered(pmuDetected ? battLine : "PWR --", 265, 2,
+              !pmuDetected ? COLOR_DANGER
+              : batteryCharging ? COLOR_CYAN
+              : batteryPercent <= 15 ? COLOR_DANGER : COLOR_MINT);
+  if (pmuDetected) {
+    if (batteryCharging) {
+      drawCentered("CHARGING", 294, 2, COLOR_CYAN);
+    } else if (batteryTimeEstimateValid) {
+      char remaining[8];
+      formatBatteryTimeRemaining(remaining, sizeof(remaining));
+      char timeLine[24];
+      snprintf(timeLine, sizeof(timeLine), "%s REMAINING", remaining);
+      drawCentered(timeLine, 294, 2, COLOR_MUTED);
+    } else {
+      drawCentered("ESTIMATING...", 294, 2, COLOR_MUTED);
+    }
+  }
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
   display->setCursor(45, 324);

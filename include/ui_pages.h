@@ -112,12 +112,18 @@ extern bool rtcDetected;
 extern bool pmuDetected;
 extern bool codecDetected;
 extern uint8_t i2cDeviceCount;
-// Battery state, read from the SY6970 charger over I2C -- see main.cpp's
-// updateBatteryReading()/batteryVoltageToPercent(). Only meaningful once
-// pmuDetected is true.
+// Battery state, read from the AXP2101 PMU over I2C -- see main.cpp's
+// updateBatteryReading(). Only meaningful once pmuDetected is true.
 extern bool batteryCharging;
 extern uint8_t batteryPercent;
 extern uint16_t batteryVoltageMv;
+// Runway estimate derived from the drain rate between recent battery
+// percentage transitions -- see main.cpp's updateBatteryTimeEstimate().
+// batteryMinutesRemaining is only meaningful when batteryTimeEstimateValid
+// is true (a synced clock, at least one observed transition, and not
+// currently charging).
+extern bool batteryTimeEstimateValid;
+extern uint32_t batteryMinutesRemaining;
 
 extern bool animationFrame;
 

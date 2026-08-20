@@ -143,6 +143,14 @@ bool batteryCharging = false;
 uint8_t batteryPercent = 0;
 uint16_t batteryVoltageMv = 0;
 uint32_t lastBatteryPoll = 0;
+// Runway estimate for the Status page -- see updateBatteryTimeEstimate()'s
+// own comment for why the rate it's derived from lives in RTC memory
+// rather than an ordinary global. False whenever there isn't yet a
+// trustworthy rate (no synced clock, no observed transition yet) or the
+// device is currently charging, in which case "time until empty" isn't a
+// meaningful thing to show.
+bool batteryTimeEstimateValid = false;
+uint32_t batteryMinutesRemaining = 0;
 bool audioReady = false;
 bool sdDetected = false;
 bool clockValid = false;
@@ -327,6 +335,75 @@ void updateBatteryReading() {
   batteryVoltageMv = mv;
   batteryPercent = min<uint8_t>(axp2101Read(0xA4), 100);
   batteryCharging = (axp2101Read(0x01) & 0x07) <= 0x03;
+}
+
+bool rtcRead(struct tm &value);
+
+// Last-observed-transition percentage/timestamp and the smoothed drain
+// rate derived from it, for updateBatteryTimeEstimate() below. RTC_DATA_ATTR
+// places these in the ESP32-S3's RTC slow memory -- the one region that
+// survives esp_deep_sleep_start() (see enterDeepIdle()), which every
+// ordinary global here does not: this device's "sleep" is a full reboot,
+// so a plain variable would forget the rate on every single wake, right
+// when there'd otherwise be a fresh data point to add to it. Reset only by
+// a genuine power-on (battery disconnect or full depletion) -- exactly the
+// moment a stale rate should be discarded anyway.
+RTC_DATA_ATTR uint8_t rtcBatteryTransitionPercent = 0xFF;  // 0xFF = no history yet
+RTC_DATA_ATTR time_t rtcBatteryTransitionEpoch = 0;
+RTC_DATA_ATTR float rtcBatteryDrainPercentPerHour = 0.0f;
+
+// Updates the drain-rate estimate and, from it, batteryMinutesRemaining --
+// called alongside updateBatteryReading() (same two call sites). Samples
+// only on an actual percentage change rather than every call: the fuel
+// gauge only reports whole percentage points and this device spends most
+// of its time asleep between glances, so sampling on a fixed timer would
+// see "no change yet" on nearly every call and drag a smoothed average
+// toward zero even while genuinely discharging. Sampling on transitions
+// instead means every data point reflects a real amount of charge used
+// over a real amount of time, however that time was actually split
+// between awake and asleep.
+void updateBatteryTimeEstimate() {
+  if (!pmuDetected || !clockValid) {
+    batteryTimeEstimateValid = false;
+    return;
+  }
+  struct tm nowTm{};
+  if (!rtcRead(nowTm)) {
+    batteryTimeEstimateValid = false;
+    return;
+  }
+  const time_t nowEpoch = mktime(&nowTm);
+
+  if (rtcBatteryTransitionPercent == 0xFF) {
+    // First sample since the last power-on -- nothing to compare against
+    // yet, just establish the starting point.
+    rtcBatteryTransitionPercent = batteryPercent;
+    rtcBatteryTransitionEpoch = nowEpoch;
+  } else if (batteryPercent != rtcBatteryTransitionPercent) {
+    const float deltaHours = (nowEpoch - rtcBatteryTransitionEpoch) / 3600.0f;
+    if (deltaHours > 0.01f) {  // guards a clock rollback/glitch, not real usage
+      const float instantRate =
+          (static_cast<float>(rtcBatteryTransitionPercent) - batteryPercent) / deltaHours;
+      // Exponential moving average rather than trusting the latest
+      // transition alone -- a single transition's timing can be thrown
+      // off by whatever the device happened to be doing (screen on vs.
+      // deep sleep) right around it. A charging transition (instantRate
+      // negative) pulls the average down same as a real rate change
+      // would; it's the validity check below, not this blend, that
+      // decides not to show a discharge estimate while charging.
+      rtcBatteryDrainPercentPerHour = rtcBatteryDrainPercentPerHour == 0.0f
+          ? instantRate
+          : rtcBatteryDrainPercentPerHour * 0.7f + instantRate * 0.3f;
+    }
+    rtcBatteryTransitionPercent = batteryPercent;
+    rtcBatteryTransitionEpoch = nowEpoch;
+  }
+
+  batteryTimeEstimateValid = !batteryCharging && rtcBatteryDrainPercentPerHour > 0.01f;
+  if (batteryTimeEstimateValid) {
+    const float hoursRemaining = batteryPercent / rtcBatteryDrainPercentPerHour;
+    batteryMinutesRemaining = static_cast<uint32_t>(hoursRemaining * 60.0f + 0.5f);
+  }
 }
 
 bool initAudio() {
@@ -817,7 +894,14 @@ void loadSettings() {
   if (settings.magic != SETTINGS_MAGIC || settings.brightnessIndex > 10 ||
       settings.sleepIndex > 3 || settings.volumeIndex > 4 ||
       settings.wakeMode > 1 || settings.themeIndex > 4) {
-    settings = {SETTINGS_MAGIC, 8, 1, true, true, 2, 0, 0};
+    // brightnessIndex 5 (~50%, was 8/~80%) and sleepIndex 0 (15s, was 1/30s)
+    // -- battery-friendlier starting points for a device running an
+    // emissive AMOLED off a 15mAh cell, picked over the previous, brighter/
+    // slower-to-sleep defaults specifically for that reason. Both are still
+    // just the fresh-install/settings-reset starting point -- Settings'
+    // own brightness slider and sleep-timeout picker still change either
+    // one at any time exactly as before.
+    settings = {SETTINGS_MAGIC, 5, 0, true, true, 2, 0, 0};
     saveSettings();
   }
 }
@@ -1085,13 +1169,26 @@ void detectAudioHardware() {
   codecDetected = i2cPresent(0x18);  // ES8311
 }
 
-void detectHardware() {
-  i2cDeviceCount = 0;
-  Serial.println("I2C hardware scan:");
-  for (uint8_t address = 1; address < 127; address++) {
-    if (i2cPresent(address)) {
-      i2cDeviceCount++;
-      Serial.printf("  found 0x%02X\n", address);
+// fullScan enumerates all 126 addresses (and logs every hit) -- worth the
+// bus time and Serial spam on a genuine cold boot, since it's the only
+// window where a board revision with different hardware would ever be
+// seen for the first time. A deep-sleep resume is the exact same physical
+// board it was 30 seconds ago; re-enumerating everything on every single
+// wake (glancing at the pet, most of this device's actual usage) was pure
+// waste, so a resume only re-probes the 4 addresses anything here actually
+// reads from. i2cDeviceCount stays 0 on a resume -- it's a diagnostic-only
+// count (Status page's own diagnostics line), not read by any decision
+// logic, so a resume simply not refreshing it costs nothing but a stale
+// number on a screen most people never open right after waking the device.
+void detectHardware(bool fullScan) {
+  if (fullScan) {
+    i2cDeviceCount = 0;
+    Serial.println("I2C hardware scan:");
+    for (uint8_t address = 1; address < 127; address++) {
+      if (i2cPresent(address)) {
+        i2cDeviceCount++;
+        Serial.printf("  found 0x%02X\n", address);
+      }
     }
   }
   // 0x6A (QMI8658's alternate address) used to be checked here too, but
@@ -1974,7 +2071,7 @@ void setup() {
   // time on its own afterward), and repeating its up-to-12s connect
   // attempt (see runStartupNetworkSync()) on every wake would be a far
   // worse cost than the animation ever was.
-  detectHardware();
+  detectHardware(!resumingFromDeepIdle);
   if (!resumingFromDeepIdle) runStartupNetworkSync();
   generatePlayerId();
   checkEvolution();
@@ -1989,6 +2086,7 @@ void setup() {
   // just take a first reading so the Status page isn't stuck at 0% before
   // loop()'s own poll gets to it.
   updateBatteryReading();
+  updateBatteryTimeEstimate();
   Serial.printf("Battery: %s (%umV, %u%%)\n", pmuDetected ? "AXP2101 ready" : "PMU not found",
                 batteryVoltageMv, batteryPercent);
   pinMode(0, INPUT_PULLUP);
@@ -2054,6 +2152,7 @@ void loop() {
   if (!sleeping && now - lastBatteryPoll >= 30000) {
     lastBatteryPoll = now;
     updateBatteryReading();
+    updateBatteryTimeEstimate();
   }
 
   if (!sleeping && now - lastInteraction >= SLEEP_TIMEOUTS[settings.sleepIndex]) {
@@ -2100,7 +2199,22 @@ void loop() {
   // below), so there's nothing for a touch read to accomplish at all while
   // asleep -- skip the I2C round trip entirely rather than reading data
   // that's guaranteed to be thrown away.
-  if (sleeping || now - lastTouchRead < 25) return;
+  if (sleeping) return;
+  // While nothing is touching the panel, only bother reading when the
+  // touch controller's own periodic-mode IRQ (touchInterrupt(), wired up
+  // via TOUCH_DEVICE_INTERRUPT_PERIODIC in setup()) says something is --
+  // that mode pulses the interrupt line for as long as a finger is on the
+  // panel and stays silent otherwise, so gating on it instead of polling
+  // blindly every 25ms skips the I2C round trip entirely for as long as
+  // the screen just sits there, which is most of any awake session.
+  // Once a touch actually starts, this reverts to the exact original
+  // fixed-cadence poll (unconditionally, ignoring the flag) all the way
+  // through release -- deliberately not trusting periodic mode's pulse
+  // behavior for mid-touch tracking or the release edge itself, only for
+  // "should I even check right now."
+  if (!touchWasDown && !touch->IIC_Interrupt_Flag) return;
+  if (now - lastTouchRead < 25) return;
+  touch->IIC_Interrupt_Flag = false;
   lastTouchRead = now;
   const int32_t fingers = touch->IIC_Read_Device_Value(
       Arduino_IIC_Touch::Value_Information::TOUCH_FINGER_NUMBER);
