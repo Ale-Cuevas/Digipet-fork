@@ -8,6 +8,7 @@
 #include <esp_system.h>
 
 #include "familiar_battle_service.h"
+#include "persist_blob.h"
 
 // vpet's implementation of the console/game seam (include/game_module.h).
 //
@@ -165,14 +166,11 @@ void savePet() {
 }
 
 void saveBattleStats() {
-  preferences.putBytes("battleStats", &battleStats, sizeof(battleStats));
+  saveBlob(preferences, "battleStats", battleStats);
 }
 
 void loadBattleStats() {
-  if (preferences.getBytesLength("battleStats") == sizeof(battleStats)) {
-    preferences.getBytes("battleStats", &battleStats, sizeof(battleStats));
-  }
-  if (battleStats.magic != BATTLE_STATS_MAGIC) {
+  if (!loadBlob(preferences, "battleStats", battleStats, BATTLE_STATS_MAGIC)) {
     // First boot, or a stored blob from a different (and thus incompatible)
     // schema -- start clean rather than risk misreading old bytes as a
     // BattleStats of the current shape.
@@ -182,47 +180,46 @@ void loadBattleStats() {
 }
 
 void saveReconLog() {
-  preferences.putBytes("reconLog", &reconLog, sizeof(reconLog));
+  saveBlob(preferences, "reconLog", reconLog);
 }
 
 void loadReconLog() {
-  if (preferences.getBytesLength("reconLog") == sizeof(reconLog)) {
-    preferences.getBytes("reconLog", &reconLog, sizeof(reconLog));
-  }
-  if (reconLog.magic != RECON_LOG_MAGIC) {
+  if (!loadBlob(preferences, "reconLog", reconLog, RECON_LOG_MAGIC)) {
     reconLog = ReconLog{};
     reconLog.magic = RECON_LOG_MAGIC;
   }
 }
 
 void saveFriendsList() {
-  preferences.putBytes("friends", &friendsList, sizeof(friendsList));
+  saveBlob(preferences, "friends", friendsList);
 }
 
 void loadFriendsList() {
-  if (preferences.getBytesLength("friends") == sizeof(friendsList)) {
-    preferences.getBytes("friends", &friendsList, sizeof(friendsList));
-  }
-  if (friendsList.magic != FRIENDS_LIST_MAGIC) {
+  if (!loadBlob(preferences, "friends", friendsList, FRIENDS_LIST_MAGIC)) {
     friendsList = FriendsList{};
     friendsList.magic = FRIENDS_LIST_MAGIC;
   }
 }
 
 void saveInventory() {
-  preferences.putBytes("inventory", &inventory, sizeof(inventory));
+  saveBlob(preferences, "inventory", inventory);
 }
 
 void loadInventory() {
-  if (preferences.getBytesLength("inventory") == sizeof(inventory)) {
-    preferences.getBytes("inventory", &inventory, sizeof(inventory));
-  }
-  if (inventory.magic != INVENTORY_MAGIC) {
+  if (!loadBlob(preferences, "inventory", inventory, INVENTORY_MAGIC)) {
     inventory = Inventory{};
     inventory.magic = INVENTORY_MAGIC;
   }
 }
 
+// copiedGenome/hasCopiedGenome don't fit loadBlob/saveBlob's shape --
+// PetGenome has no magic field of its own (it's also the wire format
+// streamed over BLE and written to SD, see pet_genome.h, so adding one
+// would be a format change with a much bigger blast radius than this
+// helper is worth), and validity here is "did the read/write come back the
+// exact right size," not a magic check, plus the genomeTransferStatus side
+// effect neither generic helper has a hook for. Stays hand-rolled, same
+// reasoning as savePet()/loadPet() below.
 void saveCopiedGenome(const PetGenome &genome) {
   copiedGenome = genome;
   hasCopiedGenome = preferences.putBytes("copiedGenome", &copiedGenome,
