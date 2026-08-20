@@ -33,9 +33,13 @@ extern PetGenome copiedGenome;
 extern bool battleGenomeCopied;
 extern bool showingBattleResults;
 extern uint8_t battleResultsPage;
+extern bool showingEvolutionDebug;
 extern bool showingRivals;
+extern bool showingReconLog;
 extern bool showingFriends;
 extern bool showingItems;
+extern bool showingGenomeProfile;
+extern Page genomeProfileReturnPage;
 extern bool fleeArmed;
 extern uint32_t fleeArmedUntil;
 
@@ -60,6 +64,8 @@ extern void presentOverlayEntrance(Page fromPage, void (*drawOverlay)());
 extern void presentOverlayExit(void (*drawOverlay)(), Page toPage);
 extern void applyTheme();
 extern void presentCoherentPageFrame(Page page);
+extern void presentGenomeProfilePage();
+extern void transitionGenomeProfileView(bool showData);
 extern bool mountGenomeCard();
 extern void closeGenomeCard();
 extern void paintBootBackdrop(const PetPalette &palette);
@@ -608,6 +614,43 @@ void checkEvolution() {
   }
 }
 
+// A manual dev-tool sibling of the real evolution above -- long-press the
+// companion creature to open, force-advances one stage on tap (see
+// gameOverlayTouch()'s own dispatch below).
+void drawEvolutionDebugPage() {
+  paintPageBackdrop();
+  drawCentered("EVOLUTION DEBUG", 24, 3, COLOR_WARNING);
+  drawCentered("DEVELOPMENT CONTROL", 61, 1, COLOR_MUTED);
+  drawPanelGlow(24, 96, 320, 174, 24, COLOR_PURPLE);
+  display->fillRoundRect(24, 96, 320, 174, 24, COLOR_CARD);
+  display->drawRoundRect(31, 103, 306, 160, 19, COLOR_PURPLE);
+  drawCentered("CURRENT FORM", 122, 1, COLOR_CYAN);
+  drawCentered(STAGE_NAMES[pet.stage], 148, 3, COLOR_TEXT);
+  drawCentered(pet.stage < 4 ? "NEXT EXPRESSION" : "FINAL EXPRESSION", 198, 1,
+               COLOR_CYAN);
+  drawCentered(pet.stage < 4 ? STAGE_NAMES[pet.stage + 1] : "MAXIMUM STAGE",
+               222, 2, pet.stage < 4 ? COLOR_MINT : COLOR_WARNING);
+
+  const uint16_t advanceFill = pet.stage < 4 ? COLOR_DANGER : COLOR_MUTED;
+  display->fillRoundRect(48, 296, 272, 58, 16, advanceFill);
+  drawCentered(pet.stage < 4 ? "ADVANCE STAGE" : "MAX STAGE", 316, 2,
+               readableTextColor(advanceFill));
+  display->fillRoundRect(92, 375, 184, 47, 14, COLOR_CARD);
+  display->drawRoundRect(92, 375, 184, 47, 14, COLOR_CYAN);
+  drawCentered("CANCEL", 391, 2, COLOR_TEXT);
+}
+
+void debugAdvanceEvolution() {
+  if (pet.stage >= 4) return;
+  pet.stage++;
+  savePet();
+  showToastf("Debug form: %s", STAGE_NAMES[pet.stage]);
+  playTone(440, 60, 40);
+  playTone(659, 70, 45);
+  playTone(880, 110, 50);
+  Serial.printf("Evolution Debug: advanced to %s\n", STAGE_NAMES[pet.stage]);
+}
+
 // --- FEED/PLAY/TRAIN and the once-a-minute care tick -------------------------
 
 void performAction(int action) {
@@ -1105,14 +1148,72 @@ void gameHandleSwipe(Page /*page*/, int16_t /*dx*/, int16_t /*dy*/) {
 }
 
 bool gameOverlayActive() {
-  // TODO(stage1): showingEvolutionDebug/showingRivals/showingReconLog/
-  // showingFriends/showingItems/showingGenomeProfile.
-  return false;
+  return showingEvolutionDebug || showingRivals || showingReconLog ||
+         showingFriends || showingItems || showingGenomeProfile;
 }
 
-void gameOverlayTouch(int16_t /*x*/, int16_t /*y*/, int16_t /*dx*/, int16_t /*dy*/,
-                      bool /*released*/) {
-  // TODO(stage1): the moved overlay if-chain's touch handling.
+// Was six separate `if (showingX)` blocks in main.cpp's touch-release
+// handler, each ending in the same touchStartX=...=-1 reset -- that reset
+// is common to every branch so it now lives once at the call site
+// (main.cpp's loop()) instead of six times here. Order matches the
+// original exactly (evolution debug first, genome profile last); see
+// gameOverlayActive()'s own call site in loop() for why reordering this
+// ahead of the console's showingPlayerId/showingUpdate overlays and the
+// evolution-debug open-trigger is safe.
+void gameOverlayTouch(int16_t x, int16_t y, int16_t dx, int16_t dy, bool released) {
+  if (!released) return;
+  if (showingEvolutionDebug) {
+    if (y >= 285 && y < 365 && pet.stage < 4) {
+      debugAdvanceEvolution();
+      showingEvolutionDebug = false;
+      presentOverlayExit(drawEvolutionDebugPage, PAGE_COMPANION);
+    } else if (y >= 365) {
+      showingEvolutionDebug = false;
+      presentOverlayExit(drawEvolutionDebugPage, PAGE_COMPANION);
+    }
+    return;
+  }
+  if (showingRivals) {
+    showingRivals = false;
+    presentOverlayExit(drawRivalsPage, PAGE_BATTLE);
+    return;
+  }
+  if (showingReconLog) {
+    showingReconLog = false;
+    presentOverlayExit(drawReconLogPage, PAGE_STATUS);
+    return;
+  }
+  if (showingFriends) {
+    handleFriendsTap(x, y);
+    return;
+  }
+  if (showingItems) {
+    handleItemsTap(x, y);
+    return;
+  }
+  if (showingGenomeProfile) {
+    // Same two-sub-view swipe shape as PAGE_STATUS/PAGE_BATTLE's own
+    // vertical-swipe handling -- see genomeProfileShowingData's own
+    // comment in ui_pages.h.
+    if (abs(dy) > 55 && abs(dy) > abs(dx)) {
+      if (dy < 0 && !genomeProfileShowingData) {
+        playTone(988, 30, 30);
+        transitionGenomeProfileView(true);
+      } else if (dy > 0 && genomeProfileShowingData) {
+        playTone(784, 30, 30);
+        transitionGenomeProfileView(false);
+      }
+    } else if (genomeProfileShowingData && y >= 270 && y < 316) {
+      if (x < LCD_WIDTH / 2) exportActiveGenome();
+      else importCopiedGenome();
+      presentGenomeProfilePage();
+    } else if ((genomeProfileShowingData && y >= 393) ||
+               (!genomeProfileShowingData && dx > 55)) {
+      showingGenomeProfile = false;
+      presentOverlayExit(drawGenomeProfilePage, genomeProfileReturnPage);
+    }
+    return;
+  }
 }
 
 // Was applyTheme()'s AUTO branch, verbatim -- moved rather than rewritten

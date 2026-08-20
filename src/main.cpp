@@ -93,6 +93,7 @@ void loadReconLog();
 void loadFriendsList();
 void loadInventory();
 void loadCopiedGenome();
+void drawEvolutionDebugPage();
 std::unique_ptr<Arduino_IIC> touch(new Arduino_CST816x(
     i2cBus, CST816T_DEVICE_ADDRESS, DRIVEBUS_DEFAULT_VALUE, TP_INT, touchInterrupt));
 
@@ -1183,40 +1184,6 @@ void presentUpdatePage(const char *status, int progress) {
   }
 }
 
-void drawEvolutionDebugPage() {
-  paintPageBackdrop();
-  drawCentered("EVOLUTION DEBUG", 24, 3, COLOR_WARNING);
-  drawCentered("DEVELOPMENT CONTROL", 61, 1, COLOR_MUTED);
-  drawPanelGlow(24, 96, 320, 174, 24, COLOR_PURPLE);
-  display->fillRoundRect(24, 96, 320, 174, 24, COLOR_CARD);
-  display->drawRoundRect(31, 103, 306, 160, 19, COLOR_PURPLE);
-  drawCentered("CURRENT FORM", 122, 1, COLOR_CYAN);
-  drawCentered(STAGE_NAMES[pet.stage], 148, 3, COLOR_TEXT);
-  drawCentered(pet.stage < 4 ? "NEXT EXPRESSION" : "FINAL EXPRESSION", 198, 1,
-               COLOR_CYAN);
-  drawCentered(pet.stage < 4 ? STAGE_NAMES[pet.stage + 1] : "MAXIMUM STAGE",
-               222, 2, pet.stage < 4 ? COLOR_MINT : COLOR_WARNING);
-
-  const uint16_t advanceFill = pet.stage < 4 ? COLOR_DANGER : COLOR_MUTED;
-  display->fillRoundRect(48, 296, 272, 58, 16, advanceFill);
-  drawCentered(pet.stage < 4 ? "ADVANCE STAGE" : "MAX STAGE", 316, 2,
-               readableTextColor(advanceFill));
-  display->fillRoundRect(92, 375, 184, 47, 14, COLOR_CARD);
-  display->drawRoundRect(92, 375, 184, 47, 14, COLOR_CYAN);
-  drawCentered("CANCEL", 391, 2, COLOR_TEXT);
-}
-
-void debugAdvanceEvolution() {
-  if (pet.stage >= 4) return;
-  pet.stage++;
-  savePet();
-  showToastf("Debug form: %s", STAGE_NAMES[pet.stage]);
-  playTone(440, 60, 40);
-  playTone(659, 70, 45);
-  playTone(880, 110, 50);
-  Serial.printf("Evolution Debug: advanced to %s\n", STAGE_NAMES[pet.stage]);
-}
-
 // One row of a scanned opponent: stage/level identity plus a 3-bar signal
 // strength readout from RSSI. No creature portrait here -- their genome
 // hasn't been exchanged yet at this point, only their HELLO/advertisement.
@@ -1816,8 +1783,7 @@ void updateClockDisplay() {
   } else {
     snprintf(clockText, sizeof(clockText), "%02d:%02d", rtcTime.tm_hour, rtcTime.tm_min);
   }
-  if (!sleeping && currentPage == PAGE_COMPANION &&
-      !showingEvolutionDebug && !showingGenomeProfile) {
+  if (!sleeping && currentPage == PAGE_COMPANION && !gameOverlayActive()) {
     // A flat COLOR_BACKGROUND fill here doesn't match paintPageBackdrop()'s
     // actual gradient at this Y, which drifts lighter toward the bottom of
     // the screen -- row by row, same as that function does, so this erase
@@ -2216,7 +2182,7 @@ void loop() {
     lastAnimation = now;
     animationFrame = !animationFrame;
     updateCreatureAnimation();
-  } else if (!sleeping && !showingEvolutionDebug && !showingGenomeProfile &&
+  } else if (!sleeping && !gameOverlayActive() &&
              currentPage == PAGE_COMPANION &&
              now - lastAnimation >= creatureFrameInterval) {
     lastAnimation = now;
@@ -2228,10 +2194,8 @@ void loop() {
     lastAnimation = now;
     animationFrame = !animationFrame;
     presentCoherentPageFrame(PAGE_GENOME_LAB);
-  } else if (!sleeping && toastVisible && !showingEvolutionDebug &&
-             !showingGenomeProfile && !showingPlayerId && !showingUpdate &&
-             !showingBattleResults && !showingRivals && !showingReconLog &&
-             !showingFriends && !showingItems &&
+  } else if (!sleeping && toastVisible && !gameOverlayActive() &&
+             !showingPlayerId && !showingUpdate && !showingBattleResults &&
              (currentPage == PAGE_STATUS || currentPage == PAGE_BATTLE ||
               currentPage == PAGE_SETTINGS) &&
              now - lastAnimation >= 30) {
@@ -2312,15 +2276,17 @@ void loop() {
       const int32_t deltaX = touchLastX - touchStartX;
       const int32_t deltaY = touchLastY - touchStartY;
       const uint32_t touchDuration = now - touchStartedAt;
-      if (showingEvolutionDebug) {
-        if (touchLastY >= 285 && touchLastY < 365 && pet.stage < 4) {
-          debugAdvanceEvolution();
-          showingEvolutionDebug = false;
-          presentOverlayExit(drawEvolutionDebugPage, PAGE_COMPANION);
-        } else if (touchLastY >= 365) {
-          showingEvolutionDebug = false;
-          presentOverlayExit(drawEvolutionDebugPage, PAGE_COMPANION);
-        }
+      // One gate for every game-owned overlay (evolution debug/Rivals/Recon
+      // Log/Friends/Items/Genome Profile) -- gameOverlayTouch() keeps the
+      // exact same per-overlay if-chain these used to be here, just moved.
+      // Safe to check ahead of the console's own showingPlayerId/
+      // showingUpdate overlays and the evolution-debug open-trigger just
+      // below despite those two originally sitting between certain of
+      // these checks: at most one showingX is ever true at a time (every
+      // overlay-open site sets exactly one and nothing reads another's
+      // flag), so this reordering changes nothing observable.
+      if (gameOverlayActive()) {
+        gameOverlayTouch(touchLastX, touchLastY, deltaX, deltaY, true);
         touchStartX = touchStartY = touchLastX = touchLastY = -1;
         return;
       }
@@ -2353,52 +2319,6 @@ void loop() {
                                     LCD_WIDTH, LCD_HEIGHT);
         } else {
           drawSettingsPage();
-        }
-        touchStartX = touchStartY = touchLastX = touchLastY = -1;
-        return;
-      }
-      if (showingRivals) {
-        showingRivals = false;
-        presentOverlayExit(drawRivalsPage, PAGE_BATTLE);
-        touchStartX = touchStartY = touchLastX = touchLastY = -1;
-        return;
-      }
-      if (showingReconLog) {
-        showingReconLog = false;
-        presentOverlayExit(drawReconLogPage, PAGE_STATUS);
-        touchStartX = touchStartY = touchLastX = touchLastY = -1;
-        return;
-      }
-      if (showingFriends) {
-        handleFriendsTap(touchLastX, touchLastY);
-        touchStartX = touchStartY = touchLastX = touchLastY = -1;
-        return;
-      }
-      if (showingItems) {
-        handleItemsTap(touchLastX, touchLastY);
-        touchStartX = touchStartY = touchLastX = touchLastY = -1;
-        return;
-      }
-      if (showingGenomeProfile) {
-        // Same two-sub-view swipe shape as PAGE_STATUS/PAGE_BATTLE's own
-        // vertical-swipe handling -- see genomeProfileShowingData's own
-        // comment in ui_pages.h.
-        if (abs(deltaY) > 55 && abs(deltaY) > abs(deltaX)) {
-          if (deltaY < 0 && !genomeProfileShowingData) {
-            playTone(988, 30, 30);
-            transitionGenomeProfileView(true);
-          } else if (deltaY > 0 && genomeProfileShowingData) {
-            playTone(784, 30, 30);
-            transitionGenomeProfileView(false);
-          }
-        } else if (genomeProfileShowingData && touchLastY >= 270 && touchLastY < 316) {
-          if (touchLastX < LCD_WIDTH / 2) exportActiveGenome();
-          else importCopiedGenome();
-          presentGenomeProfilePage();
-        } else if ((genomeProfileShowingData && touchLastY >= 393) ||
-                   (!genomeProfileShowingData && deltaX > 55)) {
-          showingGenomeProfile = false;
-          presentOverlayExit(drawGenomeProfilePage, genomeProfileReturnPage);
         }
         touchStartX = touchStartY = touchLastX = touchLastY = -1;
         return;
