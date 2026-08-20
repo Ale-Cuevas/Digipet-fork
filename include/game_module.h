@@ -52,11 +52,18 @@ void gameOverlayTouch(int16_t x, int16_t y, int16_t dx, int16_t dy, bool release
 // AUTO theme -- console code no longer references any game-specific type.
 void gameApplyAutoTheme(ThemeColors &out);
 
-// Replaces the boot animation's direct pet.genome.seed read -- the boot
-// sequence is console-owned and runs before any game state is meaningfully
-// "loaded," but still wants a deterministic-but-varied seed for particle
-// placement.
-uint32_t gameBootAnimationSeed();
+// Replaces the boot sequence's direct pet.genome/paletteForGenome() reads.
+// The boot sequence is console-owned and runs before any game state is
+// meaningfully "loaded," but still wants a palette to paint with and a
+// deterministic-but-varied seed for particle placement -- both come from
+// the game module instead of console code reaching into game-specific
+// globals directly. PetPalette itself (pet_genome.h) stays a shared type
+// here rather than being flattened to raw colors: the boot/evolution
+// animation drawing primitives (paintBootBackdrop/drawBootParticles/
+// drawBootCore) already take one as a parameter, and sharing that struct
+// shape is a much lighter coupling than reading live game state would be.
+PetPalette gameBootAnimationPalette();
+void gameBootAnimationSeed(uint32_t seed[4]);
 
 // Hook for loop()'s battle-state-edge-detection block: called whenever
 // FamiliarBattleService's state has just changed while the Battle page is

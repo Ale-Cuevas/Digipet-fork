@@ -63,7 +63,8 @@ extern void presentCoherentPageFrame(Page page);
 extern bool mountGenomeCard();
 extern void closeGenomeCard();
 extern void paintBootBackdrop(const PetPalette &palette);
-extern void drawBootParticles(const PetPalette &palette, uint32_t frame);
+extern void drawBootParticles(const PetPalette &palette, uint32_t frame,
+                              const uint32_t seed[4]);
 extern void drawBootCore(const PetPalette &palette, uint32_t frame, float progress);
 
 // --- Save schema versioning -----------------------------------------------
@@ -562,7 +563,7 @@ void playEvolutionAnimation() {
     const float progress = min(1.0f, elapsed / static_cast<float>(kBurstMs));
     display = &pageCanvasA;
     memcpy(pageCanvasA.getFramebuffer(), pageCanvasB.getFramebuffer(), frameBytes);
-    drawBootParticles(palette, frame);
+    drawBootParticles(palette, frame, pet.genome.seed);
     drawBootCore(palette, frame, 0.6f + progress * 0.4f);
     drawCentered("DATA EVOLUTION", 60, 3,
                 lerpRgb565(COLOR_BACKGROUND, COLOR_TEXT, bootSmoothstep(0.0f, 0.3f, progress)));
@@ -582,7 +583,7 @@ void playEvolutionAnimation() {
     const float eased = bootSmoothstep(0.0f, 1.0f, progress);
     display = &pageCanvasA;
     memcpy(pageCanvasA.getFramebuffer(), pageCanvasB.getFramebuffer(), frameBytes);
-    drawBootParticles(palette, kBurstMs / 18 + frame);
+    drawBootParticles(palette, kBurstMs / 18 + frame, pet.genome.seed);
     drawCentered("DATA EVOLUTION", 60, 3, COLOR_TEXT);
     drawCreaturePortrait(pet.genome, pet.stage, BOOT_CX, BOOT_CORE_Y,
                         lroundf(40 + eased * 62),
@@ -1073,9 +1074,11 @@ void handleItemsTap(int16_t x, int16_t y) {
   presentItemsPage();
 }
 
-// --- The console/game seam itself (still placeholders -- see this file's
-// --- top comment; the dispatch cutover that wires these for real is a
-// --- later Stage 1 step) --------------------------------------------------
+// --- The console/game seam itself -- gameApplyAutoTheme()/
+// --- gameBootAnimationPalette()/gameBootAnimationSeed() are wired for real
+// --- (Stage 1's landmine-fix step); the rest are still placeholders, same
+// --- as this file's top comment describes -- the dispatch cutover that
+// --- wires those for real is a later Stage 1 step. ------------------------
 
 void gameInit() {
   // TODO(stage1): call loadPet/loadCopiedGenome/loadBattleStats/
@@ -1112,13 +1115,35 @@ void gameOverlayTouch(int16_t /*x*/, int16_t /*y*/, int16_t /*dx*/, int16_t /*dy
   // TODO(stage1): the moved overlay if-chain's touch handling.
 }
 
-void gameApplyAutoTheme(ThemeColors & /*out*/) {
-  // TODO(stage1): out = colors derived from paletteForGenome(pet.genome).
+// Was applyTheme()'s AUTO branch, verbatim -- moved rather than rewritten
+// so this stays exactly the palette-to-theme mapping it always was.
+void gameApplyAutoTheme(ThemeColors &out) {
+  const PetPalette petPalette = paletteForGenome(pet.genome);
+  out.background = scaleRgb565(petPalette.primaryDark, 22);
+  out.card = scaleRgb565(petPalette.primaryDark, 55);
+  out.primary = petPalette.primaryLight;
+  out.text = 0xF7BE;
+  // Blended toward `text` rather than just darkened off petPalette.secondary
+  // (the old scaleRgb565(..., 82) here) -- AUTO's background/card are
+  // genome-derived and can land anywhere, so unlike the 4 fixed themes' own
+  // muted tone (see kThemes[]' own comment in ui_pages.h) there's no single
+  // contrast fix that's provably correct for every possible genome. Leaning
+  // on the one fixed, always-bright color this branch has (`text`) is the
+  // best available heuristic improvement over a flat darken, which had no
+  // relationship to either backdrop's actual brightness at all.
+  out.muted = lerpRgb565(petPalette.secondary, out.text, 0.35f);
+  out.warning = petPalette.accent;
+  out.danger = 0xF2CB;
+  out.cyan = petPalette.glow;
+  out.secondary = petPalette.secondary;
 }
 
-uint32_t gameBootAnimationSeed() {
-  // TODO(stage1): return pet.genome.seed[0] (or similar).
-  return 0;
+PetPalette gameBootAnimationPalette() {
+  return paletteForGenome(pet.genome);
+}
+
+void gameBootAnimationSeed(uint32_t seed[4]) {
+  for (uint8_t i = 0; i < 4; ++i) seed[i] = pet.genome.seed[i];
 }
 
 void gameOnBattleStateChanged() {

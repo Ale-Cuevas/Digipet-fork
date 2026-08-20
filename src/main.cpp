@@ -20,6 +20,7 @@
 
 #include "pin_config.h"
 #include "familiar_battle_service.h"
+#include "game_module.h"
 #include "ota_updater.h"
 #include "game/vpet/pet_genome.h"
 #include "ui_pages.h"
@@ -776,30 +777,12 @@ uint8_t subtractClamped(uint8_t value, uint8_t amount) {
 }
 
 void applyTheme() {
-  if (settings.themeIndex == 0) {
-    const PetPalette petPalette = paletteForGenome(pet.genome);
-    COLOR_BACKGROUND = scaleRgb565(petPalette.primaryDark, 22);
-    COLOR_CARD = scaleRgb565(petPalette.primaryDark, 55);
-    COLOR_MINT = petPalette.primaryLight;
-    COLOR_TEXT = 0xF7BE;
-    // Blended toward COLOR_TEXT rather than just darkened off
-    // petPalette.secondary (the old scaleRgb565(..., 82) here) -- AUTO's
-    // background/card are genome-derived and can land anywhere, so unlike
-    // the 4 fixed themes' own COLOR_MUTED (see kThemes[]' own comment)
-    // there's no single contrast fix that's provably correct for every
-    // possible genome. Leaning on the one fixed, always-bright color this
-    // branch has (COLOR_TEXT) is the best available heuristic improvement
-    // over a flat darken, which had no relationship to either backdrop's
-    // actual brightness at all.
-    COLOR_MUTED = lerpRgb565(petPalette.secondary, COLOR_TEXT, 0.35f);
-    COLOR_WARNING = petPalette.accent;
-    COLOR_DANGER = 0xF2CB;
-    COLOR_CYAN = petPalette.glow;
-    COLOR_PURPLE = petPalette.secondary;
-    return;
-  }
-
-  const ThemeColors &theme = kThemes[settings.themeIndex];
+  // AUTO (themeIndex 0) has no fixed palette of its own -- it's derived
+  // from whatever game is running (gameApplyAutoTheme(), game_vpet.cpp for
+  // this build) instead of console code reaching into game-specific state
+  // (PetGenome/paletteForGenome()) directly.
+  ThemeColors theme = kThemes[settings.themeIndex];
+  if (settings.themeIndex == 0) gameApplyAutoTheme(theme);
   COLOR_BACKGROUND = theme.background;
   COLOR_CARD = theme.card;
   COLOR_MINT = theme.primary;
@@ -861,11 +844,11 @@ void paintBootBackdrop(const PetPalette &palette) {
   display = previousDisplay;
 }
 
-void drawBootParticles(const PetPalette &palette, uint32_t frame) {
+void drawBootParticles(const PetPalette &palette, uint32_t frame, const uint32_t seed[4]) {
   constexpr uint8_t COUNT = 22;
   const float rise = frame * 0.6f;
   for (uint8_t i = 0; i < COUNT; ++i) {
-    const uint32_t seedWord = pet.genome.seed[i % 4];
+    const uint32_t seedWord = seed[i % 4];
     const uint8_t place = (seedWord >> ((i * 5) % 24)) & 0xFF;
     const int16_t x = 26 + (place % (LCD_WIDTH - 52));
     const float speed = 0.35f + (i % 5) * 0.12f;
@@ -1051,7 +1034,9 @@ void bootAnimation() {
 
   const uint32_t animationStarted = millis();
   constexpr uint32_t BOOT_DURATION_MS = 5200;
-  const PetPalette palette = paletteForGenome(pet.genome);
+  const PetPalette palette = gameBootAnimationPalette();
+  uint32_t particleSeed[4];
+  gameBootAnimationSeed(particleSeed);
   panel->setBrightness(180);
   paintBootBackdrop(palette);
   pinMode(0, INPUT_PULLUP);  // lets a boot-key press fast-forward the sequence
@@ -1072,7 +1057,7 @@ void bootAnimation() {
     Arduino_GFX *previousDisplay = display;
     display = &pageCanvasA;
     memcpy(pageCanvasA.getFramebuffer(), pageCanvasB.getFramebuffer(), frameBytes);
-    drawBootParticles(palette, frame);
+    drawBootParticles(palette, frame, particleSeed);
     drawBootHelix(palette, frame, progress);
     drawBootCore(palette, frame, progress);
     drawBootTitle(progress);
