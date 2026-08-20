@@ -156,10 +156,10 @@ bool sdDetected = false;
 bool clockValid = false;
 bool timeSynced = false;
 uint32_t lastClockDraw = 0;
-uint32_t lastBootRead = 0;
+uint32_t lastPwrRead = 0;
 uint32_t nextBlink = 0;
 uint32_t blinkUntil = 0;
-bool bootWasDown = false;
+bool pwrWasDown = false;
 char clockText[6] = "--:--";
 // `message` is the current feedback string; it's only actually shown while
 // `toastVisible` is true, as a slide-down banner drawn by drawToastOverlay()
@@ -1124,7 +1124,7 @@ void bootAnimation() {
   gameBootAnimationSeed(particleSeed);
   panel->setBrightness(180);
   paintBootBackdrop(palette);
-  pinMode(0, INPUT_PULLUP);  // lets a boot-key press fast-forward the sequence
+  pinMode(0, INPUT_PULLUP);  // lets a power-key press fast-forward the sequence
   playBootClipAsync();
 
   const size_t frameBytes = static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t);
@@ -1953,11 +1953,11 @@ void turnScreenOff() {
   panel->setBrightness(0);
   panel->displayOff();
   digitalWrite(AUDIO_PA, LOW);
-  Serial.println("Display: off; entering deep sleep, boot key remains the only wake");
+  Serial.println("Display: off; entering deep sleep, power key remains the only wake");
   enterDeepIdle();  // never returns
 }
 
-// Only reachable from pollBootWake() during the brief sleeping-but-not-
+// Only reachable from pollPowerButton() during the brief sleeping-but-not-
 // screenOff window (the blinking-face countdown in enterSleep(), before
 // turnScreenOff() hands off to deep sleep) -- a real wake from deep sleep
 // goes through setup()'s own fast path instead, since deep sleep is a
@@ -1975,12 +1975,23 @@ void wakeUp() {
   drawHome();
 }
 
-void pollBootWake(uint32_t now) {
-  if (now - lastBootRead < 25) return;
-  lastBootRead = now;
+// GPIO0 is a genuine power key now, not just a wake source: a fresh press
+// wakes it from sleep same as always, but a fresh press while awake also
+// puts it to sleep immediately instead of waiting for the idle timeout --
+// see enterSleep()'s own comment for why that's a one-way trip through a
+// full reboot rather than something this function resumes after.
+void pollPowerButton(uint32_t now) {
+  if (now - lastPwrRead < 25) return;
+  lastPwrRead = now;
   const bool down = digitalRead(0) == LOW;
-  if (down && !bootWasDown && sleeping) wakeUp();
-  bootWasDown = down;
+  if (down && !pwrWasDown) {
+    if (sleeping) {
+      wakeUp();
+    } else {
+      enterSleep();  // never returns
+    }
+  }
+  pwrWasDown = down;
 }
 
 void setup() {
@@ -2090,6 +2101,13 @@ void setup() {
   Serial.printf("Battery: %s (%umV, %u%%)\n", pmuDetected ? "AXP2101 ready" : "PMU not found",
                 batteryVoltageMv, batteryPercent);
   pinMode(0, INPUT_PULLUP);
+  // A resume's own wake press can easily still be held down right as
+  // loop() starts -- seeding this from the pin's actual current state
+  // (rather than the false a fresh RAM global would default to) means
+  // pollPowerButton() sees "no new edge" until that same press is
+  // released, instead of misreading the tail end of the wake press itself
+  // as a brand new one and immediately sleeping right back.
+  pwrWasDown = digitalRead(0) == LOW;
   nextBlink = millis() + 2200;
   lastMinute = lastInteraction = lastBatteryPoll = lastAnimation = millis();
 
@@ -2153,13 +2171,22 @@ void loop() {
     lastBatteryPoll = now;
     updateBatteryReading();
     updateBatteryTimeEstimate();
+    // The Status summary view is the only screen showing any of this, and
+    // nothing else redraws it on a timer (unlike Companion/Genome Lab,
+    // which already repaint every tick, Status only otherwise redraws on
+    // navigation or while a toast is up) -- without this, plugging in a
+    // charger while sitting on this exact page wouldn't actually appear
+    // on screen until some unrelated event happened to repaint it.
+    if (currentPage == PAGE_STATUS && !statusShowingActions && !gameOverlayActive()) {
+      presentCoherentPageFrame(PAGE_STATUS);
+    }
   }
 
   if (!sleeping && now - lastInteraction >= SLEEP_TIMEOUTS[settings.sleepIndex]) {
     enterSleep();
   }
 
-  pollBootWake(now);
+  pollPowerButton(now);
 
   if (sleeping && !screenOff && now - lastAnimation >= 900) {
     lastAnimation = now;
@@ -2195,7 +2222,7 @@ void loop() {
     if (currentPage == PAGE_GENOME_LAB) drawHome();
   }
 
-  // Touch can't wake it anymore (see pollBootWake()/the sleeping branch
+  // Touch can't wake it anymore (see pollPowerButton()/the sleeping branch
   // below), so there's nothing for a touch read to accomplish at all while
   // asleep -- skip the I2C round trip entirely rather than reading data
   // that's guaranteed to be thrown away.
@@ -2230,7 +2257,7 @@ void loop() {
       touchStartedAt = now;
       // sleeping is unreachable here -- the whole touch block above is
       // skipped while asleep (touch can't wake it anymore, see
-      // pollBootWake()), so nothing below needs to handle that case.
+      // pollPowerButton()), so nothing below needs to handle that case.
       lastInteraction = now;
       touchStartX = touchLastX = x;
       touchStartY = touchLastY = y;

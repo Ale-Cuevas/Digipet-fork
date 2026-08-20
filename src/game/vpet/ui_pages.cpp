@@ -1158,7 +1158,7 @@ void drawSettingsPage() {
     drawSettingsTile(1, 190, 78, "IDLE TIMER", SLEEP_LABELS[settings.sleepIndex]);
     drawSettingsTile(2, 18, 227, "VOLUME", VOLUME_LABELS[settings.volumeIndex]);
     // Wake Mode was retired: touch no longer wakes the device at all (only
-    // the boot key does, see main.cpp's pollBootWake()), so there's no
+    // the power key does, see main.cpp's pollPowerButton()), so there's no
     // longer a choice here to present. Same locked-placeholder treatment
     // the Status page's own reserved tiles use.
     drawSettingsTile(3, 190, 227, "LOCKED", "COMING SOON", /*locked=*/true);

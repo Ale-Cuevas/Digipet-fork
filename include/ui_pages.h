@@ -145,7 +145,7 @@ struct DeviceSettings {
   bool bootAnimationEnabled;
   uint8_t volumeIndex;
   // No longer read anywhere -- Wake Mode was retired (touch can't wake the
-  // device at all now, only the boot key). Left in place rather than
+  // device at all now, only the power key). Left in place rather than
   // removed so this struct's layout, and every offset after it, doesn't
   // need yet another settings-schema migration for a single dead byte.
   uint8_t wakeMode;
