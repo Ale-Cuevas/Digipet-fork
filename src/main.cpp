@@ -351,6 +351,7 @@ bool rtcRead(struct tm &value);
 RTC_DATA_ATTR uint8_t rtcBatteryTransitionPercent = 0xFF;  // 0xFF = no history yet
 RTC_DATA_ATTR time_t rtcBatteryTransitionEpoch = 0;
 RTC_DATA_ATTR float rtcBatteryDrainPercentPerHour = 0.0f;
+RTC_DATA_ATTR bool rtcWasCharging = false;
 
 // Updates the drain-rate estimate and, from it, batteryMinutesRemaining --
 // called alongside updateBatteryReading() (same two call sites). Samples
@@ -377,6 +378,37 @@ void updateBatteryTimeEstimate() {
   }
   const time_t nowEpoch = mktime(&nowTm);
 
+  // Charging pushes the percentage up -- a completely different quantity
+  // from the load-current drain this estimate is about, not just a
+  // negative version of it. The first version of this function blended
+  // charging's percent-rising ticks into the very same smoothed average as
+  // real discharge ticks; a single charge session could stack up several
+  // strongly negative samples that then took many real discharge
+  // transitions to wash back out, leaving the estimate stuck invalid (or
+  // wrong) for a long stretch after every charge. Restarting clean the
+  // moment a charging session ends avoids that entirely, at the cost of
+  // needing one fresh discharge transition after every charge before an
+  // estimate reappears -- a real trade, but a bounded and honest one,
+  // unlike silently-contaminated data.
+  if (rtcWasCharging && !batteryCharging) {
+    rtcBatteryDrainPercentPerHour = 0.0f;
+    rtcBatteryTransitionPercent = batteryPercent;
+    rtcBatteryTransitionEpoch = nowEpoch;
+    Serial.printf("Battery estimate: charging ended at %u%%, rate reset\n", batteryPercent);
+  }
+  rtcWasCharging = batteryCharging;
+
+  if (batteryCharging) {
+    // Nothing to estimate while charging -- just keep the anchor current
+    // so whenever charging ends, the first post-charge transition measures
+    // real discharge time only, not time stretching back through the
+    // charge too.
+    rtcBatteryTransitionPercent = batteryPercent;
+    rtcBatteryTransitionEpoch = nowEpoch;
+    batteryTimeEstimateValid = false;
+    return;
+  }
+
   if (rtcBatteryTransitionPercent == 0xFF) {
     // First sample since the last power-on -- nothing to compare against
     // yet, just establish the starting point.
@@ -391,11 +423,8 @@ void updateBatteryTimeEstimate() {
       // Exponential moving average rather than trusting the latest
       // transition alone -- a single transition's timing can be thrown
       // off by whatever the device happened to be doing (screen on vs.
-      // deep sleep) right around it. A charging transition (instantRate
-      // negative) pulls the average down same as a real rate change
-      // would; it's the validity check below, not this blend, that
-      // decides not to show a discharge estimate while charging.
-      rtcBatteryDrainPercentPerHour = rtcBatteryDrainPercentPerHour == 0.0f
+      // deep sleep) right around it.
+      rtcBatteryDrainPercentPerHour = rtcBatteryDrainPercentPerHour <= 0.0f
           ? instantRate
           : rtcBatteryDrainPercentPerHour * 0.7f + instantRate * 0.3f;
       Serial.printf("Battery estimate: transition %u%%->%u%% over %.2fh, "
@@ -412,7 +441,7 @@ void updateBatteryTimeEstimate() {
                   batteryPercent, hoursSinceAnchor, rtcBatteryDrainPercentPerHour);
   }
 
-  batteryTimeEstimateValid = !batteryCharging && rtcBatteryDrainPercentPerHour > 0.01f;
+  batteryTimeEstimateValid = rtcBatteryDrainPercentPerHour > 0.01f;
   if (batteryTimeEstimateValid) {
     const float hoursRemaining = batteryPercent / rtcBatteryDrainPercentPerHour;
     batteryMinutesRemaining = static_cast<uint32_t>(hoursRemaining * 60.0f + 0.5f);
