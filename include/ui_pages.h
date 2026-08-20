@@ -8,6 +8,7 @@
 #include "color_utils.h"
 #include "familiar_battle_service.h"
 #include "game/vpet/pet_genome.h"
+#include "game/vpet/vpet_state.h"
 #include "pin_config.h"
 
 // The Companion/Status page renderers and their shared drawing helpers,
@@ -21,36 +22,14 @@
 // still owns every one of these globals (constructs them, mutates them,
 // persists them) -- this header only declares their shape and existence so
 // a second translation unit (either main.cpp's own, now living in
-// src/ui_pages.cpp, or the sim harness with its own fake definitions) can
-// link against them.
+// src/game/vpet/ui_pages.cpp, or the sim harness with its own fake
+// definitions) can link against them.
 //
-// PetState and Page moved here rather than staying main.cpp-local because
-// the extern declarations below need PetState complete and Page defined.
-
-struct PetState {
-  uint32_t magic;
-  uint32_t ageMinutes;
-  uint32_t actions;
-  uint8_t food;
-  uint8_t joy;
-  uint8_t energy;
-  uint8_t health;
-  uint8_t stage;
-  uint8_t training;
-  uint8_t reserved[2];
-  // Permanent battle-stat boosts from consumed items (see main.cpp's
-  // Inventory/useItem()) -- HP/ATK/DEF/Special are all boostable the same
-  // way; Type isn't a numeric stat, so an item that changes it (TYPE_SHIFT)
-  // writes genome.element directly instead of a field here. Added in
-  // PET_MAGIC's 4th schema (see main.cpp's own PET_MAGIC_V3/PET_MAGIC
-  // comment) -- not reserved[]'s remaining byte, since these are 4 fields,
-  // not 1.
-  uint8_t bonusHp;
-  uint8_t bonusAttack;
-  uint8_t bonusDefense;
-  uint8_t bonusSpecial;
-  PetGenome genome;
-};
+// PetState/BattleStats/ReconLog/FriendsList/Inventory themselves are
+// defined in game/vpet/vpet_state.h, not here -- those are vpet's own
+// state shapes (part of the console/game seam), while Page below is a
+// console-owned slot enum every game module's pages get dispatched
+// through, so it stays in this, the console-facing header.
 
 enum Page : uint8_t {
   PAGE_COMPANION,
@@ -142,100 +121,14 @@ extern uint16_t batteryVoltageMv;
 
 extern bool animationFrame;
 
-// A per-device record, not a per-pet one -- persists across egg hatches/
-// blends. Definition (magic-guarded, persisted through Preferences/NVS)
-// stays in main.cpp; the type lives here because drawRivalsPage() reads it.
-constexpr uint8_t kMaxBattleRivals = 8;
-
-struct BattleRival {
-  uint32_t playerId = 0;
-  uint16_t wins = 0;
-  uint16_t losses = 0;
-};
-
-struct BattleStats {
-  uint32_t magic = 0;
-  uint32_t wins = 0;
-  uint32_t losses = 0;
-  uint32_t fled = 0;
-  uint32_t opponentFled = 0;
-  uint32_t disconnected = 0;
-  uint8_t rivalCount = 0;
-  uint8_t reserved[3]{};
-  BattleRival rivals[kMaxBattleRivals]{};
-};
+// BattleStats/ReconLog/FriendsList/Inventory's shapes live in
+// game/vpet/vpet_state.h (included above) -- these per-device records are
+// magic-guarded, persisted through Preferences/NVS, defined in main.cpp;
+// drawRivalsPage()/drawReconLogPage()/drawFriendsPage()/drawItemsPage()
+// read them directly via these externs.
 extern BattleStats battleStats;
-
-// Also a per-device record, same shape of reasoning as BattleStats just
-// above -- persists across egg hatches/blends, magic-guarded definition
-// stays in main.cpp. Populated by FEED's WiFi/BLE signal scan
-// (performFeedScan(), main.cpp); drawReconLogPage() reads it directly.
-constexpr uint8_t kMaxReconEntries = 8;
-
-struct ReconEntry {
-  uint32_t idHash = 0;        // FNV-1a of the BSSID (WiFi) or address string (BLE).
-  uint32_t firstSeenAge = 0;  // pet.ageMinutes at first sighting -- a relative,
-                              // always-valid clock, unlike wall time (no RTC needed).
-  uint8_t kind = 0;           // 0 = WiFi AP, 1 = BLE device.
-  char label[13] = {};        // WiFi: truncated SSID. BLE: empty -- a passive scan
-                              // never connects, so no name is ever exchanged.
-};
-
-struct ReconLog {
-  uint32_t magic = 0;
-  uint32_t totalScans = 0;
-  uint32_t totalUniqueSeen = 0;
-  uint8_t entryCount = 0;
-  uint8_t reserved[3]{};
-  ReconEntry entries[kMaxReconEntries]{};
-};
 extern ReconLog reconLog;
-
-// Same per-device-record reasoning as BattleStats/ReconLog above. Added via
-// a live BLE "Exchange ID" handshake (FamiliarBattleMode::FriendExchange,
-// familiar_battle_service.h) rather than a battle outcome -- see main.cpp's
-// addFriend(), called on the Idle-state edge into
-// FamiliarBattleState::Exchanged the same way recordBattleOutcome() is
-// called on the edge into Result.
-constexpr uint8_t kMaxFriends = 8;
-
-struct FriendEntry {
-  uint32_t playerId = 0;
-  uint32_t addedAge = 0;  // pet.ageMinutes when this friend was added.
-};
-
-struct FriendsList {
-  uint32_t magic = 0;
-  uint8_t count = 0;
-  uint8_t reserved[3]{};
-  FriendEntry friends[kMaxFriends]{};
-};
 extern FriendsList friendsList;
-
-// A rare bonus drop from FEED's WiFi/BLE signal scan (see main.cpp's
-// performFeedScan()) when it turns up a device never seen before --
-// "mutation trigger" hardware in the wild, in this app's own fiction.
-// HP/ATK/DEF/SPECIAL are numeric boosts, all mandatory in the sense that
-// every one of them maps onto a stat this app's battle math already has
-// (deriveMaxHp/deriveAttack/deriveDefense, FamiliarBattleCapabilities::
-// special) -- a future cross-device sync of these wouldn't need any peer
-// to support something new. TYPE_SHIFT is deliberately last/separate: it
-// rerolls genome.element (a categorical pick, not a number to add to) and
-// isn't a stat any wire-protocol capability negotiation is about, so nothing
-// here assumes a peer device understands it either.
-enum ItemType : uint8_t {
-  ITEM_HP_BOOST,
-  ITEM_ATK_BOOST,
-  ITEM_DEF_BOOST,
-  ITEM_SPECIAL_BOOST,
-  ITEM_TYPE_SHIFT,
-};
-constexpr uint8_t kItemTypeCount = 5;
-
-struct Inventory {
-  uint32_t magic = 0;
-  uint8_t counts[kItemTypeCount]{};
-};
 extern Inventory inventory;
 
 struct DeviceSettings {

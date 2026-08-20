@@ -26,7 +26,7 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 
 g++ -std=c++17 -O1 \
   tools/sim/render_harness.cpp \
-  src/ui_pages.cpp \
+  src/game/vpet/ui_pages.cpp \
   src/game/vpet/pet_genome.cpp \
   src/color_utils.cpp \
   src/game/vpet/familiar_battle_rules.cpp \

@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(git add *)",
-      "Bash(git commit -q -m 'Move pet_genome and familiar_battle_rules into game/vpet/ *)"
+      "Bash(git commit -q -m 'Move pet_genome and familiar_battle_rules into game/vpet/ *)",
+      "Bash(git commit -q -m 'Move vpet'\\\\''s PetState/BattleStats/ReconLog/FriendsList/Inventory and ui_pages.cpp into game/vpet/ *)"
     ]
   }
 }
