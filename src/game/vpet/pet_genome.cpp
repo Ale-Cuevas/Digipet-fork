@@ -1,4 +1,4 @@
-#include "pet_genome.h"
+#include "game/vpet/pet_genome.h"
 
 #include <cstdio>
 #include <esp_system.h>

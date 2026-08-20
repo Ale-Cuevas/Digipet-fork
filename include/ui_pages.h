@@ -7,7 +7,7 @@
 
 #include "color_utils.h"
 #include "familiar_battle_service.h"
-#include "pet_genome.h"
+#include "game/vpet/pet_genome.h"
 #include "pin_config.h"
 
 // The Companion/Status page renderers and their shared drawing helpers,
@@ -133,6 +133,12 @@ extern bool rtcDetected;
 extern bool pmuDetected;
 extern bool codecDetected;
 extern uint8_t i2cDeviceCount;
+// Battery state, read from the SY6970 charger over I2C -- see main.cpp's
+// updateBatteryReading()/batteryVoltageToPercent(). Only meaningful once
+// pmuDetected is true.
+extern bool batteryCharging;
+extern uint8_t batteryPercent;
+extern uint16_t batteryVoltageMv;
 
 extern bool animationFrame;
 

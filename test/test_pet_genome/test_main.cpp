@@ -9,7 +9,7 @@
 #include <unity.h>
 
 #include "esp_system.h"  // esp_random_reseed -- fakes/, deterministic RNG
-#include "pet_genome.h"
+#include "game/vpet/pet_genome.h"
 
 namespace {
 

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'Move pet_genome and familiar_battle_rules into game/vpet/ *)"
+    ]
+  }
+}

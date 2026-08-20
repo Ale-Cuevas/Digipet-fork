@@ -1,6 +1,6 @@
 #include "familiar_battle_service.h"
 
-#include "familiar_battle_rules.h"
+#include "game/vpet/familiar_battle_rules.h"
 
 #include <NimBLEAdvertisedDevice.h>
 #include <NimBLEDevice.h>

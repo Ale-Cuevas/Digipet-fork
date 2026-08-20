@@ -8,6 +8,7 @@
 #include <time.h>
 #include <esp32-hal-psram.h>
 #include <esp_attr.h>
+#include <driver/rtc_io.h>
 #include <esp_mac.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
@@ -20,7 +21,7 @@
 #include "pin_config.h"
 #include "familiar_battle_service.h"
 #include "ota_updater.h"
-#include "pet_genome.h"
+#include "game/vpet/pet_genome.h"
 #include "ui_pages.h"
 
 
@@ -68,6 +69,7 @@ void touchInterrupt();
 void drawCentered(const char *text, int16_t y, uint8_t size, uint16_t color);
 bool i2cPresent(uint8_t address);
 void saveCopiedGenome(const PetGenome &genome);
+void turnScreenOff();
 std::unique_ptr<Arduino_IIC> touch(new Arduino_CST816x(
     i2cBus, CST816T_DEVICE_ADDRESS, DRIVEBUS_DEFAULT_VALUE, TP_INT, touchInterrupt));
 
@@ -108,26 +110,20 @@ bool rtcDetected = false;
 bool pmuDetected = false;
 bool codecDetected = false;
 uint8_t i2cDeviceCount = 0;
+// Battery state, read straight off the AXP2101 PMU at I2C address 0x34
+// (see updateBatteryReading()). batteryPercent is only meaningful once
+// pmuDetected is true and updateBatteryReading() has run at least once
+// (setup() does one synchronously so the first Status page view isn't
+// stuck at 0%).
+bool batteryCharging = false;
+uint8_t batteryPercent = 0;
+uint16_t batteryVoltageMv = 0;
+uint32_t lastBatteryPoll = 0;
 bool audioReady = false;
 bool sdDetected = false;
 bool clockValid = false;
 bool timeSynced = false;
 uint32_t lastClockDraw = 0;
-uint32_t sleepStarted = 0;
-// Survives deep sleep (regular globals don't -- deep sleep is a reboot, not
-// a resume). True from the moment enterDeepIdle() first runs until a real
-// wake, so setup() can tell "this reset is one of the periodic boot-key
-// checks while idling" apart from a genuine power-on/reflash. See
-// enterDeepIdle() and setup()'s own use of this near its very top.
-RTC_DATA_ATTR bool rtcIdling = false;
-// How often the boot key gets checked while idling. Each check is a full
-// reboot (deep sleep has no lighter "resume" option -- see enterDeepIdle()),
-// which costs real time and current on its own before the chip can even
-// get back down to deep sleep's own floor, so too tight an interval would
-// spend more time booting than actually asleep. 1s measured worse than
-// light sleep did; 5s is the next data point, not a settled value -- see
-// the commit that changed this for the readings behind it.
-constexpr uint64_t kIdlePollIntervalUs = 5000000;  // 5s
 uint32_t lastBootRead = 0;
 uint32_t nextBlink = 0;
 uint32_t blinkUntil = 0;
@@ -274,6 +270,39 @@ uint8_t codecRead(uint8_t reg) {
   if (Wire.endTransmission(false) != 0) return 0;
   if (Wire.requestFrom(0x18, 1) != 1) return 0;
   return Wire.read();
+}
+
+// Same shape as codecRead() above, for the AXP2101 PMU at I2C address
+// 0x34 (register numbers below are that chip's own, e.g. "register 0x01"
+// -- unrelated to the 0x34 device address itself). Deliberately read-only:
+// there's no axp2101Write(). The AXP2101 also owns the board's DCDC/LDO
+// voltage rails, and this device already boots and runs fine without our
+// firmware touching any of that, so updateBatteryReading() below only
+// ever reads status/data registers the chip already reports on its own
+// power-on defaults (fuel gauge enabled: reg0x18 bit 3; VBAT ADC channel
+// enabled: reg0x30 bit 0 -- both 1 out of reset per the AXP2101 datasheet).
+uint8_t axp2101Read(uint8_t reg) {
+  Wire.beginTransmission(0x34);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return 0;
+  if (Wire.requestFrom(0x34, 1) != 1) return 0;
+  return Wire.read();
+}
+
+// reg0x34/reg0x35 are the fuel gauge's own VBAT ADC result (14-bit,
+// 1 code = 1mV); reg0xA4 is the E-Gauge's coulomb-counted percentage,
+// already 0-100 with no curve-fitting needed on our end; reg0x01 bits
+// [2:0] are the charging state machine (0-3 = tri/pre/constant-current/
+// constant-voltage charge, 4 = done, 5 = not charging -- see the
+// AXP2101 datasheet's REG 01 and REG A4 descriptions).
+void updateBatteryReading() {
+  if (!pmuDetected) return;
+  const uint16_t mv = (static_cast<uint16_t>(axp2101Read(0x34) & 0x3F) << 8) |
+                       axp2101Read(0x35);
+  if (mv == 0) return;  // failed/garbage read -- keep the last good value
+  batteryVoltageMv = mv;
+  batteryPercent = min<uint8_t>(axp2101Read(0xA4), 100);
+  batteryCharging = (axp2101Read(0x01) & 0x07) <= 0x03;
 }
 
 bool initAudio() {
@@ -1469,13 +1498,16 @@ void detectHardware() {
       Serial.printf("  found 0x%02X\n", address);
     }
   }
-  imuDetected = i2cPresent(0x6A) || i2cPresent(0x6B);  // QMI8658
-  rtcDetected = i2cPresent(0x51);                       // PCF85063
-  pmuDetected = i2cPresent(0x34);                       // AXP2101
-  codecDetected = i2cPresent(0x18);                     // ES8311
-  Serial.printf("QMI8658:%s  RTC:%s  PMU:%s  CODEC:%s\n",
-                imuDetected ? "yes" : "no", rtcDetected ? "yes" : "no",
-                pmuDetected ? "yes" : "no", codecDetected ? "yes" : "no");
+  // 0x6A (QMI8658's alternate address) used to be checked here too, but
+  // a live scan against the real board shows nothing answers there --
+  // this board's IMU only responds at 0x6B, so it was always a no-op.
+  imuDetected = i2cPresent(0x6B);   // QMI8658
+  rtcDetected = i2cPresent(0x51);   // PCF85063
+  pmuDetected = i2cPresent(0x34);   // AXP2101
+  codecDetected = i2cPresent(0x18); // ES8311
+  Serial.printf("QMI8658:%s  RTC:%s  PMU:%s  CODEC:%s\n", imuDetected ? "yes" : "no",
+                rtcDetected ? "yes" : "no", pmuDetected ? "yes" : "no",
+                codecDetected ? "yes" : "no");
 }
 
 void flashPressedHighlight(int16_t x, int16_t y, int16_t w, int16_t h, int16_t radius) {
@@ -2631,9 +2663,7 @@ void enterSleep() {
   sleeping = true;
   showingEvolutionDebug = false;
   screenOff = false;
-  sleepStarted = millis();
   animationFrame = false;
-  panel->setBrightness(55);
   // Touch reads stop entirely while sleeping (see loop()), so a touch that
   // somehow was still down at the exact moment the idle timeout fired would
   // otherwise never get its release processed, leaving stale coordinates
@@ -2641,17 +2671,34 @@ void enterSleep() {
   // there's nothing left to resolve.
   touchWasDown = false;
   touchStartX = touchStartY = touchLastX = touchLastY = -1;
-  drawSleep();
+  // Idle means fully idle: blank the panel and enter deep sleep immediately
+  // instead of spending another ten seconds animating a sleep screen.
+  turnScreenOff();  // never returns
 }
 
-// Deep sleep is a reboot, not a resume -- there is no lighter-weight way
-// to wait here, so this never returns. setup()'s own fast path (see its
-// top) is the other half of this: it's what actually checks the boot key
-// on each of these wakes and either goes straight back here or falls
-// through to a real resume.
+// GPIO0 is the board's active-low boot button and is also an ESP32-S3 RTC
+// GPIO, so it can wake the chip directly without periodic timer reboots.
 void enterDeepIdle() {
-  rtcIdling = true;
-  esp_sleep_enable_timer_wakeup(kIdlePollIntervalUs);
+  // Configure the pin through the RTC block explicitly. Keeping RTC_PERIPH
+  // powered is required for the internal pull-up to remain active; otherwise
+  // GPIO0 can float low in deep sleep and immediately wake the chip again.
+  rtc_gpio_init(GPIO_NUM_0);
+  rtc_gpio_set_direction(GPIO_NUM_0, RTC_GPIO_MODE_INPUT_ONLY);
+  rtc_gpio_pullup_en(GPIO_NUM_0);
+  rtc_gpio_pulldown_dis(GPIO_NUM_0);
+  esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+
+  // EXT1 is the ESP32-S3's robust multi-RTC-GPIO wake path. ANY_LOW matches
+  // the active-low BOOT switch and consumes no periodic timer wakeups.
+  const esp_err_t wakeResult = esp_sleep_enable_ext1_wakeup_io(
+      1ULL << GPIO_NUM_0, ESP_EXT1_WAKEUP_ANY_LOW);
+  if (wakeResult != ESP_OK) {
+    Serial.printf("Deep sleep: button wake setup failed (%d)\n",
+                  static_cast<int>(wakeResult));
+    Serial.flush();
+    delay(50);
+    esp_restart();
+  }
   esp_deep_sleep_start();
 }
 
@@ -2946,54 +2993,21 @@ void handleItemsTap(int16_t x, int16_t y) {
 }
 
 void setup() {
-  // Deep-sleep idle-check fast path. While this is idling in a pocket, this
-  // exact reboot happens once every kIdlePollIntervalUs, so it has to cost
-  // as close to nothing as possible: GPIO0 doesn't need Serial, Wire,
-  // Preferences, or any peripheral to read, so none of that runs at all
-  // unless the boot key is actually down. Only a genuine deep-sleep wake
-  // with rtcIdling still set counts as one of these checks -- any other
-  // reset (power-on, USB reflash, brownout, ...) falls straight through to
-  // the normal boot below, and rtcIdling wouldn't mean anything outside of
-  // a real deep-sleep wake anyway.
+  // A deep-sleep resume is only possible through the boot-button wake source.
+  // Other resets remain ordinary boots even if their reset reason happens to
+  // follow an earlier idle cycle.
   const bool resumingFromDeepIdle =
-      esp_reset_reason() == ESP_RST_DEEPSLEEP && rtcIdling;
-  if (resumingFromDeepIdle) {
-    pinMode(0, INPUT_PULLUP);
-    if (digitalRead(0) != LOW) {
-      // TEMPORARY debug heartbeat -- the whole point of this path is to
-      // cost nothing, so it normally has zero Serial output, which means
-      // no visibility into whether it's cycling healthily or dying on its
-      // own before a real wake is ever attempted. Pull this back out once
-      // the wake-after-deep-sleep hang is found.
-      //
-      // Native USB CDC (this board has no separate USB-serial bridge chip)
-      // needs real time to re-enumerate with the host after the hard reset
-      // deep sleep causes -- the first attempt at this heartbeat printed
-      // nothing at all and the connection never came back, most likely
-      // because it went straight back to sleep before the port was even
-      // attached, let alone before the print physically went out. These
-      // delays exist purely to give USB room to actually work for this
-      // debugging round; they're a real, deliberate power cost on top of
-      // the temporary Serial.begin() above, not something to keep either.
-      Serial.begin(115200);
-      delay(300);
-      Serial.println("idle check: not pressed, back to sleep");
-      Serial.flush();
-      delay(200);
-      enterDeepIdle();  // never returns
-    }
-    // Boot key is down: a real wake. Falls through to the rest of setup(),
-    // which skips the animated intro and network sync further down but
-    // otherwise re-initializes hardware the normal way -- deep sleep
-    // doesn't leave anything short of that actually usable.
-  }
-  rtcIdling = false;
+      esp_reset_reason() == ESP_RST_DEEPSLEEP &&
+      esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT1;
 
   Serial.begin(115200);
   delay(100);
   Serial.printf("Digipet firmware v%s\n", DIGIPET_VERSION);
   Serial.printf("Reset reason: %d%s\n", static_cast<int>(esp_reset_reason()),
                 resumingFromDeepIdle ? " (deep-sleep resume)" : "");
+  Serial.printf("Wake cause: %d; EXT1 status: 0x%llX\n",
+                static_cast<int>(esp_sleep_get_wakeup_cause()),
+                static_cast<unsigned long long>(esp_sleep_get_ext1_wakeup_status()));
   Wire.begin(IIC_SDA, IIC_SCL);
   preferences.begin("digipet", false);
   loadSettings();
@@ -3076,9 +3090,16 @@ void setup() {
         Arduino_IIC_Touch::Device::TOUCH_DEVICE_INTERRUPT_MODE,
         Arduino_IIC_Touch::Device_Mode::TOUCH_DEVICE_INTERRUPT_PERIODIC);
   }
+  // pmuDetected was already set above (detectHardware()); nothing to
+  // initialize on the AXP2101 itself (see axp2101Read()'s own comment) --
+  // just take a first reading so the Status page isn't stuck at 0% before
+  // loop()'s own poll gets to it.
+  updateBatteryReading();
+  Serial.printf("Battery: %s (%umV, %u%%)\n", pmuDetected ? "AXP2101 ready" : "PMU not found",
+                batteryVoltageMv, batteryPercent);
   pinMode(0, INPUT_PULLUP);
   nextBlink = millis() + 2200;
-  lastMinute = lastInteraction = lastAnimation = millis();
+  lastMinute = lastInteraction = lastBatteryPoll = lastAnimation = millis();
 
   // wakeUp() draws its own frame (with the "Link restored" toast/chime) on
   // a resume, so the plain draw below is only for a genuine boot -- doing
@@ -3133,12 +3154,18 @@ void loop() {
     lastMinute += 60000;
     agePet();
   }
+  // Skipped while asleep, same reasoning as the touch-read skip further
+  // down: nothing redraws the Status page's battery line while asleep, so
+  // there's nothing for a reading taken now to accomplish.
+  if (!sleeping && now - lastBatteryPoll >= 30000) {
+    lastBatteryPoll = now;
+    updateBatteryReading();
+  }
 
   if (!sleeping && now - lastInteraction >= SLEEP_TIMEOUTS[settings.sleepIndex]) {
     enterSleep();
   }
 
-  if (sleeping && !screenOff && now - sleepStarted >= 10000) turnScreenOff();
   pollBootWake(now);
 
   if (sleeping && !screenOff && now - lastAnimation >= 900) {

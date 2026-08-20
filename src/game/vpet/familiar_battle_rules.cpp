@@ -1,4 +1,4 @@
-#include "familiar_battle_rules.h"
+#include "game/vpet/familiar_battle_rules.h"
 
 #include <algorithm>
 

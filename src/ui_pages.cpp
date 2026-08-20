@@ -7,7 +7,7 @@
 // file (and tools/sim's render harness that links it) has no business
 // depending on. familiar_battle_rules.cpp is the same NimBLE-free file the
 // native test suite already links for exactly this reason.
-#include "familiar_battle_rules.h"
+#include "game/vpet/familiar_battle_rules.h"
 
 uint16_t scaleRgb565(uint16_t color, uint8_t percent) {
   const uint16_t red = min<uint16_t>(31, ((color >> 11) & 0x1F) * percent / 100);
@@ -868,8 +868,21 @@ void drawStatusSummaryView() {
   display->setTextColor(rtcDetected ? COLOR_MINT : COLOR_DANGER);
   display->print(rtcDetected ? "RTC OK" : "RTC --");
   display->setCursor(45, 294);
-  display->setTextColor(pmuDetected ? COLOR_MINT : COLOR_DANGER);
-  display->print(pmuDetected ? "PWR OK" : "PWR --");
+  // Was a plain "PWR OK/--" (pmuDetected on its own); now that pmuDetected
+  // actually means "AXP2101 PMU responding" (see main.cpp's
+  // detectHardware()), this slot can show the number it exists to report
+  // instead of just a yes/no. The label itself switches to CHG while
+  // charging rather than leaving that as a color-only cue (cyan, matching
+  // the panel's own cyan glow) -- otherwise mint/danger by level, same
+  // low-battery threshold as batteryPercent's other reader would use, if
+  // there ever is one.
+  char battLabel[10];
+  snprintf(battLabel, sizeof(battLabel), "%s %u%%", batteryCharging ? "CHG" : "BATT",
+           batteryPercent);
+  display->setTextColor(!pmuDetected ? COLOR_DANGER
+                        : batteryCharging ? COLOR_CYAN
+                        : batteryPercent <= 15 ? COLOR_DANGER : COLOR_MINT);
+  display->print(pmuDetected ? battLabel : "PWR --");
   display->setCursor(195, 294);
   display->setTextColor(codecDetected ? COLOR_MINT : COLOR_DANGER);
   display->print(codecDetected ? "SOUND OK" : "SOUND --");

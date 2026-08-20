@@ -27,9 +27,9 @@ trap 'rm -rf "$BUILD_DIR"' EXIT
 g++ -std=c++17 -O1 \
   tools/sim/render_harness.cpp \
   src/ui_pages.cpp \
-  src/pet_genome.cpp \
+  src/game/vpet/pet_genome.cpp \
   src/color_utils.cpp \
-  src/familiar_battle_rules.cpp \
+  src/game/vpet/familiar_battle_rules.cpp \
   lib/GFX_Library_for_Arduino/src/Arduino_G.cpp \
   lib/GFX_Library_for_Arduino/src/Arduino_GFX.cpp \
   lib/GFX_Library_for_Arduino/src/canvas/Arduino_Canvas.cpp \

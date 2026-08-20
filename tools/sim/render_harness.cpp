@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <cstring>
 
-#include "pet_genome.h"
+#include "game/vpet/pet_genome.h"
 #include "ui_pages.h"
 
 // --- Definitions for the globals ui_pages.h declares extern -------------------
@@ -42,6 +42,9 @@ bool rtcDetected = true;
 bool pmuDetected = true;
 bool codecDetected = true;
 uint8_t i2cDeviceCount = 7;
+bool batteryCharging = false;
+uint8_t batteryPercent = 82;
+uint16_t batteryVoltageMv = 3980;
 
 bool animationFrame = false;
 
