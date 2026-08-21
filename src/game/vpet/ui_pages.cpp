@@ -890,6 +890,15 @@ void drawStatusSummaryView() {
   if (pmuDetected) {
     if (batteryCharging) {
       drawCentered("CHARGING", 294, 2, COLOR_CYAN);
+    } else if (!clockValid) {
+      // A genuinely different, more useful thing to say than "estimating"
+      // -- without a synced clock there's no way to time a transition at
+      // all, so this isn't "still working on it," it's "can't work on it
+      // yet." Worth distinguishing on screen: checking this requires
+      // plugging in USB to see Serial output, which starts charging the
+      // device and hides the very thing being checked -- see this
+      // conversation's own back-and-forth on why that doesn't work here.
+      drawCentered("NO CLOCK SYNC", 294, 2, COLOR_DANGER);
     } else if (batteryTimeEstimateValid) {
       char remaining[8];
       formatBatteryTimeRemaining(remaining, sizeof(remaining));
@@ -897,7 +906,14 @@ void drawStatusSummaryView() {
       snprintf(timeLine, sizeof(timeLine), "%s REMAINING", remaining);
       drawCentered(timeLine, 294, 2, COLOR_MUTED);
     } else {
-      drawCentered("ESTIMATING...", 294, 2, COLOR_MUTED);
+      // Elapsed wait time instead of a static ellipsis -- same reasoning
+      // as the NO CLOCK SYNC line above: this needs to be checkable from
+      // the screen alone, and a number that visibly climbs is proof
+      // something is actually happening, not just a frozen-looking label.
+      char waitingLine[20];
+      snprintf(waitingLine, sizeof(waitingLine), "WAITING (%luM)",
+               (unsigned long)batteryMinutesSinceTransition);
+      drawCentered(waitingLine, 294, 2, COLOR_MUTED);
     }
   }
   display->setTextSize(1);

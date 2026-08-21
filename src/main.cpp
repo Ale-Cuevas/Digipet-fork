@@ -151,6 +151,14 @@ uint32_t lastBatteryPoll = 0;
 // meaningful thing to show.
 bool batteryTimeEstimateValid = false;
 uint32_t batteryMinutesRemaining = 0;
+// Minutes since the drain-rate anchor (rtcBatteryTransitionEpoch) was last
+// set -- exposed so the Status page can show real wait-time progress
+// instead of a static "ESTIMATING..." that looks identical whether it's
+// been 1 minute or 3 hours. Connecting a serial monitor to check this any
+// other way means plugging in USB, which charges the device and defeats
+// the point of watching a discharge estimate -- this has to be readable
+// from the screen alone.
+uint32_t batteryMinutesSinceTransition = 0;
 bool audioReady = false;
 bool sdDetected = false;
 bool clockValid = false;
@@ -441,6 +449,8 @@ void updateBatteryTimeEstimate() {
                   batteryPercent, hoursSinceAnchor, rtcBatteryDrainPercentPerHour);
   }
 
+  batteryMinutesSinceTransition =
+      static_cast<uint32_t>((nowEpoch - rtcBatteryTransitionEpoch) / 60);
   batteryTimeEstimateValid = rtcBatteryDrainPercentPerHour > 0.01f;
   if (batteryTimeEstimateValid) {
     const float hoursRemaining = batteryPercent / rtcBatteryDrainPercentPerHour;

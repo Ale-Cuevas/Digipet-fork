@@ -47,6 +47,7 @@ uint8_t batteryPercent = 82;
 uint16_t batteryVoltageMv = 3980;
 bool batteryTimeEstimateValid = true;
 uint32_t batteryMinutesRemaining = 14 * 60 + 20;  // ~14H, exercises the formatter
+uint32_t batteryMinutesSinceTransition = 12;
 
 bool animationFrame = false;
 

@@ -124,6 +124,11 @@ extern uint16_t batteryVoltageMv;
 // currently charging).
 extern bool batteryTimeEstimateValid;
 extern uint32_t batteryMinutesRemaining;
+// Minutes waited so far since the drain-rate tracking last reset its
+// anchor point -- shown on-screen while !batteryTimeEstimateValid so
+// there's visible progress instead of a static "still calculating" that
+// looks the same whether it's been a minute or an hour.
+extern uint32_t batteryMinutesSinceTransition;
 
 extern bool animationFrame;
 
