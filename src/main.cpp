@@ -880,6 +880,43 @@ void runStartupNetworkSync() {
   expander.digitalWrite(7, LOW);
 }
 
+// A deep-sleep resume's counterpart to runStartupNetworkSync() -- unlike a
+// cold boot, a resume never otherwise touches the RTC at all, and RAM
+// (including clockValid itself) doesn't survive the reboot deep sleep
+// actually is, so without this a resume would read clockValid as false
+// forever, even when the RTC's own retained time is perfectly fine (it
+// keeps time independently of the ESP32's own sleep state; deep sleep
+// doesn't touch it). A plain read covers the overwhelming majority of
+// resumes at near-zero cost -- no SD card, no WiFi.
+//
+// The one thing a plain read can't fix -- the RTC chip itself lost power
+// (e.g. the whole device fully discharged) and its retained time is gone
+// -- falls back to the same SD-card/WiFi/NTP recovery path a cold boot
+// uses, but only then, and deliberately ignoring the syncOnBoot
+// preference (that setting means "resync every cold boot regardless,"
+// which isn't what a resume's one-time recovery attempt is for) --
+// otherwise every single ordinary wake would pay for an SD card mount
+// just to check a setting it doesn't need. This is also the only
+// automatic way the clock ever recovers after a full battery drain: nothing
+// else in normal day-to-day use (waking via the power key) ever performs
+// a genuine cold boot.
+void resyncClockAfterResume() {
+  struct tm rtcTime{};
+  clockValid = rtcDetected && rtcRead(rtcTime);
+  if (clockValid) {
+    snprintf(clockText, sizeof(clockText), "%02d:%02d", rtcTime.tm_hour, rtcTime.tm_min);
+    Serial.println("RTC: valid retained time found (resume)");
+    return;
+  }
+  Serial.println("RTC: time is invalid or power was lost (resume) -- attempting recovery sync");
+  if (!readNetworkConfig()) return;
+  expander.pinMode(7, OUTPUT);
+  expander.digitalWrite(7, HIGH);
+  delay(100);
+  synchronizeClock();
+  expander.digitalWrite(7, LOW);
+}
+
 void generatePlayerId() {
   uint8_t mac[6]{};
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -2129,13 +2166,19 @@ void setup() {
 
   // The rest of hardware bring-up runs as its own visible phase, after the
   // animation has already played uninterrupted rather than polled
-  // mid-frame -- unchanged on a resume. Network/time sync is skipped on a
-  // resume specifically: it's a once-per-real-boot thing (the RTC keeps
-  // time on its own afterward), and repeating its up-to-12s connect
-  // attempt (see runStartupNetworkSync()) on every wake would be a far
-  // worse cost than the animation ever was.
+  // mid-frame -- unchanged on a resume. The *full* network/time sync
+  // (runStartupNetworkSync()'s up-to-12s WiFi connect attempt, gated by
+  // the syncOnBoot preference) is skipped on a resume specifically: it's
+  // meant as a once-per-real-boot thing, and repeating it on every wake
+  // would be a far worse cost than the animation ever was. A resume still
+  // needs to know whether the clock is currently valid, though --
+  // resyncClockAfterResume() is the cheap RTC-only check that answers
+  // that (and only falls through to the same expensive WiFi/NTP path if
+  // the RTC itself has actually lost its retained time, its own comment
+  // has the reasoning).
   detectHardware(!resumingFromDeepIdle);
   if (!resumingFromDeepIdle) runStartupNetworkSync();
+  else resyncClockAfterResume();
   generatePlayerId();
   checkEvolution();
 
