@@ -11,7 +11,10 @@
       "Bash(sed -i '1128,1230d' src/main.cpp)",
       "Bash(sed -i '842,1100d' src/main.cpp)",
       "Bash(ls /dev/ttyACM* 2>&1)",
-      "Read(//dev/**)"
+      "Read(//dev/**)",
+      "Bash(which pio *)",
+      "Read(//home/tom/.platformio/penv/bin/**)",
+      "Bash(pio test *)"
     ]
   }
 }
