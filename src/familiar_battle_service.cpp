@@ -223,6 +223,15 @@ bool FamiliarBattleService::beginHost(
     advData.setManufacturerData(payload, sizeof(payload));
     advertising->setAdvertisementData(advData);
     advertising->addServiceUUID(kServiceUuid);
+    if (mode == FamiliarBattleMode::FriendExchange) {
+        // Friend discovery does not need battle matchmaking's fast response.
+        // BLE interval units are 0.625 ms, so this advertises roughly once
+        // every 0.8-1.0 seconds instead of using NimBLE's much faster default.
+        // It remains easy to find during a four-second Nearby scan while
+        // substantially reducing radio wakeups during the visible mode.
+        advertising->setMinInterval(1280);
+        advertising->setMaxInterval(1600);
+    }
     if (!advertising->start()) {
         status_ = "Advertising failed";
         teardownRadio();

@@ -81,7 +81,8 @@ void recordBattleOutcome(FamiliarBattleOutcome outcome, uint32_t opponentPlayerI
 void addFriend(uint32_t playerId);
 void handleBattleTap(int16_t x, int16_t y);
 void handleBattleGridTap(int16_t x, int16_t y);
-void handleFriendsTap(int16_t x, int16_t y);
+void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy);
+void presentFriendsPage();
 void handleItemsTap(int16_t x, int16_t y);
 bool exportActiveGenome();
 bool importCopiedGenome();
@@ -140,6 +141,7 @@ uint8_t i2cDeviceCount = 0;
 // (setup() does one synchronously so the first Status page view isn't
 // stuck at 0%).
 bool batteryCharging = false;
+bool externalPowerPresent = false;
 uint8_t batteryPercent = 0;
 uint16_t batteryVoltageMv = 0;
 uint32_t lastBatteryPoll = 0;
@@ -223,6 +225,8 @@ constexpr uint32_t FRIENDS_LIST_MAGIC = 0x46524E31;  // "FRN" + schema 1
 
 FriendsList friendsList{};
 bool showingFriends = false;
+uint8_t friendsPage = 0;
+bool friendDiscoverable = false;
 
 // See this flag's own comment in ui_pages.h.
 bool statusShowingActions = false;
@@ -342,7 +346,12 @@ void updateBatteryReading() {
   if (mv == 0) return;  // failed/garbage read -- keep the last good value
   batteryVoltageMv = mv;
   batteryPercent = min<uint8_t>(axp2101Read(0xA4), 100);
-  batteryCharging = (axp2101Read(0x01) & 0x07) <= 0x03;
+  const uint8_t chargeState = axp2101Read(0x01) & 0x07;
+  batteryCharging = chargeState <= 0x03;
+  // AXP2101 state 4 means charge complete: current has stopped, but VBUS is
+  // still supplying the board. Keep that distinct from "charging" for the
+  // status UI while treating it as externally powered for sleep policy.
+  externalPowerPresent = chargeState <= 0x04;
 }
 
 bool rtcRead(struct tm &value);
@@ -1992,6 +2001,9 @@ void drawSleep() {
 }
 
 void enterSleep() {
+  // Refresh at the decision boundary so a cable connected during the
+  // ordinary 30-second polling interval cannot be missed.
+  updateBatteryReading();
   playTone(523, 80);
   playTone(392, 120);
   sleeping = true;
@@ -2005,9 +2017,10 @@ void enterSleep() {
   // there's nothing left to resolve.
   touchWasDown = false;
   touchStartX = touchStartY = touchLastX = touchLastY = -1;
-  // Idle means fully idle: blank the panel and enter deep sleep immediately
-  // instead of spending another ten seconds animating a sleep screen.
-  turnScreenOff();  // never returns
+  // On battery, idle becomes deep sleep. While externally powered, only the
+  // display and amplifier turn off; the CPU/BLE stay alive and the power key
+  // wakes the UI without a reboot.
+  turnScreenOff();
 }
 
 // GPIO0 is the board's active-low boot button and is also an ESP32-S3 RTC
@@ -2042,19 +2055,28 @@ void turnScreenOff() {
   panel->setBrightness(0);
   panel->displayOff();
   digitalWrite(AUDIO_PA, LOW);
+  if (externalPowerPresent) {
+    Serial.println("Display: off; external power present, remaining awake");
+    return;
+  }
   Serial.println("Display: off; entering deep sleep, power key remains the only wake");
-  enterDeepIdle();  // never returns
+  enterDeepIdle();
 }
 
-// Only reachable from pollPowerButton() during the brief sleeping-but-not-
-// screenOff window (the blinking-face countdown in enterSleep(), before
-// turnScreenOff() hands off to deep sleep) -- a real wake from deep sleep
-// goes through setup()'s own fast path instead, since deep sleep is a
-// reboot and this function's in-RAM state wouldn't have survived it
-// anyway. screenOff is therefore always false here; nothing left to
-// restore for the display/amp the way earlier revisions of this function
-// needed to.
+// Reachable two ways: during the brief sleeping-but-not-screenOff window
+// (the blinking-face countdown in enterSleep(), before turnScreenOff()
+// hands off), where screenOff is false and there's nothing to restore; and
+// from the externally-powered screenOff state turnScreenOff() can now
+// leave the CPU running in, where it is true and the display/amp need
+// restoring below. A real wake from actual deep sleep (on battery) goes
+// through setup()'s own fast path instead, since deep sleep is a reboot
+// and this function's in-RAM state wouldn't have survived it anyway.
 void wakeUp() {
+  if (screenOff) {
+    panel->displayOn();
+    digitalWrite(AUDIO_PA, HIGH);
+    screenOff = false;
+  }
   sleeping = false;
   lastInteraction = millis();
   panel->setBrightness(brightnessLevel());
@@ -2066,9 +2088,10 @@ void wakeUp() {
 
 // GPIO0 is a genuine power key now, not just a wake source: a fresh press
 // wakes it from sleep same as always, but a fresh press while awake also
-// puts it to sleep immediately instead of waiting for the idle timeout --
-// see enterSleep()'s own comment for why that's a one-way trip through a
-// full reboot rather than something this function resumes after.
+// puts it to sleep immediately instead of waiting for the idle timeout.
+// On battery this is a one-way trip through a full reboot (enterSleep()
+// hands off to deep sleep); while externally powered it instead leaves the
+// CPU running with the display off, so enterSleep() does return here.
 void pollPowerButton(uint32_t now) {
   if (now - lastPwrRead < 25) return;
   lastPwrRead = now;
@@ -2077,7 +2100,7 @@ void pollPowerButton(uint32_t now) {
     if (sleeping) {
       wakeUp();
     } else {
-      enterSleep();  // never returns
+      enterSleep();
     }
   }
   pwrWasDown = down;
@@ -2221,10 +2244,13 @@ void setup() {
 }
 
 void loop() {
-  // screenOff can never be observed true here: turnScreenOff() hands off
-  // straight to enterDeepIdle(), which reboots the device rather than
-  // returning to this loop. Deep idle is handled entirely in setup()'s own
-  // fast path instead -- see its top and enterDeepIdle()'s own comment.
+  // screenOff (and sleeping) can be observed true here whenever the device
+  // is externally powered: turnScreenOff() only hands off to enterDeepIdle()
+  // (a reboot, never returning to this loop -- deep idle is handled
+  // entirely in setup()'s own fast path instead) while running on battery.
+  // With power connected it instead leaves the CPU/BLE running with the
+  // display off, so this loop keeps iterating and needs to behave -- see
+  // the sleeping-gated branches below.
   const uint32_t now = millis();
   serviceSerialDebug();
   if (currentPage == PAGE_BATTLE && battle.state() != FamiliarBattleState::Idle) {
@@ -2244,11 +2270,25 @@ void loop() {
           lastBattleState != FamiliarBattleState::Exchanged) {
         addFriend(battle.opponent().playerId);
       }
+      if (showingFriends && friendDiscoverable &&
+          battle.state() != FamiliarBattleState::Hosting) {
+        friendDiscoverable = false;
+      }
       lastBattleState = battle.state();
       lastBattleTurn = battle.turnNumber();
       lastBattleMyHp = battle.myHp();
       lastBattleOpponentHp = battle.opponentHp();
-      presentBattlePage();
+      // A background friend exchange (Discoverable, screen off/asleep) can
+      // still land a state change here -- battle.update() above runs
+      // unconditionally, regardless of sleeping. Skip the redraw while
+      // asleep: with the screen off there's nothing to show it on, and
+      // while merely drifting off (sleeping but not yet screenOff) the
+      // panel is mid-way through drawSleep()'s own animation, which this
+      // would otherwise paint straight over.
+      if (!sleeping) {
+        if (showingFriends) presentFriendsPage();
+        else presentBattlePage();
+      }
     }
   }
   if (now - lastClockDraw >= 1000) {
@@ -2259,20 +2299,26 @@ void loop() {
     lastMinute += 60000;
     agePet();
   }
-  // Skipped while asleep, same reasoning as the touch-read skip further
-  // down: nothing redraws the Status page's battery line while asleep, so
-  // there's nothing for a reading taken now to accomplish.
-  if (!sleeping && now - lastBatteryPoll >= 30000) {
+  // Continue PMU polling in the externally-powered screen-off state so
+  // unplugging the cable can hand off to real deep sleep.
+  if ((!sleeping || screenOff) && now - lastBatteryPoll >= 30000) {
     lastBatteryPoll = now;
     updateBatteryReading();
     updateBatteryTimeEstimate();
+    if (sleeping && screenOff && !externalPowerPresent) {
+      Serial.println("External power removed while display was off; entering deep sleep");
+      enterDeepIdle();
+    }
     // The Status summary view is the only screen showing any of this, and
     // nothing else redraws it on a timer (unlike Companion/Genome Lab,
     // which already repaint every tick, Status only otherwise redraws on
     // navigation or while a toast is up) -- without this, plugging in a
     // charger while sitting on this exact page wouldn't actually appear
-    // on screen until some unrelated event happened to repaint it.
-    if (currentPage == PAGE_STATUS && !statusShowingActions && !gameOverlayActive()) {
+    // on screen until some unrelated event happened to repaint it. Skipped
+    // while sleeping (this branch can still run then, screenOff-on-external-
+    // power) since the display is physically off with nothing to show it.
+    if (!sleeping && currentPage == PAGE_STATUS && !statusShowingActions &&
+        !gameOverlayActive()) {
       presentCoherentPageFrame(PAGE_STATUS);
     }
   }

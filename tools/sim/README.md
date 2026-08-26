@@ -34,6 +34,8 @@ tools/sim/render.sh recon /tmp/recon.png 5            # [stage] arg = signal cou
 tools/sim/render.sh recon-empty /tmp/recon-empty.png
 tools/sim/render.sh friends /tmp/friends.png 5        # [stage] arg = friend count (max 8)
 tools/sim/render.sh friends-empty /tmp/friends-empty.png
+tools/sim/render.sh friends-discover /tmp/discover.png # Discoverable page
+tools/sim/render.sh friends-nearby /tmp/nearby.png      # radar empty state
 tools/sim/render.sh items /tmp/items.png              # fixed sample counts/bonuses
 tools/sim/render.sh items-empty /tmp/items-empty.png
 tools/sim/render.sh genome-identity /tmp/genome-id.png    # Genome Profile, identity sub-view

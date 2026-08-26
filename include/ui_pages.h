@@ -47,6 +47,7 @@ enum StatIcon : uint8_t { ICON_FOOD, ICON_JOY, ICON_ENERGY, ICON_HEALTH };
 
 extern Arduino_GFX *display;
 extern PetState pet;
+extern FamiliarBattleService battle;
 
 // Status page has two sub-views, the same "peer sub-views, swipe between
 // them, no back button" shape as Settings' own home-grid paging (see
@@ -115,6 +116,7 @@ extern uint8_t i2cDeviceCount;
 // Battery state, read from the AXP2101 PMU over I2C -- see main.cpp's
 // updateBatteryReading(). Only meaningful once pmuDetected is true.
 extern bool batteryCharging;
+extern bool externalPowerPresent;
 extern uint8_t batteryPercent;
 extern uint16_t batteryVoltageMv;
 // Runway estimate derived from the drain rate between recent battery
@@ -140,6 +142,8 @@ extern bool animationFrame;
 extern BattleStats battleStats;
 extern ReconLog reconLog;
 extern FriendsList friendsList;
+extern uint8_t friendsPage;
+extern bool friendDiscoverable;
 extern Inventory inventory;
 
 struct DeviceSettings {
@@ -348,6 +352,9 @@ void drawReconLogPage();
 // FamiliarBattleMode::FriendExchange) so starting an exchange doesn't
 // require leaving the page you're looking at the list from.
 void drawFriendsPage();
+void drawFriendsDirectoryPage();
+void drawFriendDiscoverablePage();
+void drawFriendsNearbyPage();
 
 // Also a full-screen overlay, opened from the Status page's action grid's
 // (page 2) ITEMS tile. Reads inventory directly; tapping an item tile with

@@ -43,6 +43,7 @@ bool pmuDetected = true;
 bool codecDetected = true;
 uint8_t i2cDeviceCount = 7;
 bool batteryCharging = false;
+bool externalPowerPresent = false;
 uint8_t batteryPercent = 82;
 uint16_t batteryVoltageMv = 3980;
 bool batteryTimeEstimateValid = true;
@@ -62,6 +63,9 @@ SettingsView settingsView = SETTINGS_HOME;
 BattleStats battleStats{};
 ReconLog reconLog{};
 FriendsList friendsList{};
+FamiliarBattleService battle;
+uint8_t friendsPage = 0;
+bool friendDiscoverable = false;
 Inventory inventory{};
 bool genomeProfileShowingData = false;
 char genomeTransferStatus[32] = "NO COPIED GENOME";
@@ -377,6 +381,13 @@ int main(int argc, char **argv) {
     for (uint8_t i = 0; i < friendsList.count; ++i) {
       friendsList.friends[i] = {ids[i], static_cast<uint32_t>(i * 60)};
     }
+    drawFriendsPage();
+  } else if (strcmp(page, "friends-discover") == 0) {
+    friendsPage = 1;
+    friendDiscoverable = true;
+    drawFriendsPage();
+  } else if (strcmp(page, "friends-nearby") == 0) {
+    friendsPage = 2;
     drawFriendsPage();
   } else if (strcmp(page, "items-empty") == 0) {
     seedTestPet(stage);

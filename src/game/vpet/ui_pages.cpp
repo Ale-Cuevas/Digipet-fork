@@ -1723,18 +1723,38 @@ void drawReconLogPage() {
 // button hit-test regions (main.cpp) key off this exact 18/190,378 pair of
 // rects, same relationship drawBattlePage()'s own comment on its Idle
 // state's HOST/FIND rects has with handleBattleTap().
-void drawFriendsPage() {
+static bool isFriendId(uint32_t playerId) {
+  for (uint8_t i = 0; i < friendsList.count; ++i) {
+    if (friendsList.friends[i].playerId == playerId) return true;
+  }
+  return false;
+}
+
+static void drawFriendsFooter(uint8_t page) {
+  for (uint8_t i = 0; i < 3; ++i) {
+    const int16_t y = 185 + (static_cast<int16_t>(i) - page) * 13;
+    display->fillCircle(356, y, i == page ? 4 : 2, i == page ? COLOR_MINT : COLOR_MUTED);
+  }
+  drawCentered(page == 0 ? "SWIPE UP FOR DISCOVERY" :
+               page == 2 ? "SWIPE DOWN FOR DIRECTORY" : "SWIPE UP OR DOWN",
+               373, 1, COLOR_MUTED);
+  display->fillRoundRect(92, 388, 184, 46, 14, COLOR_CARD);
+  display->drawRoundRect(92, 388, 184, 46, 14, COLOR_CYAN);
+  drawCentered("BACK", 404, 2, COLOR_TEXT);
+}
+
+void drawFriendsDirectoryPage() {
   paintPageBackdrop();
   drawCentered("FRIENDS", 18, 3, COLOR_MINT);
-  drawCentered("ADDED VIA EXCHANGE ID", 51, 1, COLOR_CYAN);
+  drawCentered("DIRECTORY // 1 OF 3", 51, 1, COLOR_CYAN);
 
-  drawPanelGlow(20, 70, 328, 296, 26, COLOR_PURPLE);
-  display->fillRoundRect(20, 70, 328, 296, 26, COLOR_CARD);
-  display->drawRoundRect(27, 77, 314, 282, 21, COLOR_PURPLE);
+  drawPanelGlow(20, 70, 328, 310, 26, COLOR_PURPLE);
+  display->fillRoundRect(20, 70, 328, 310, 26, COLOR_CARD);
+  display->drawRoundRect(27, 77, 314, 296, 21, COLOR_PURPLE);
 
   if (friendsList.count == 0) {
     drawCentered("NO FRIENDS YET", 205, 2, COLOR_TEXT);
-    drawCentered("HOST OR FIND BELOW TO EXCHANGE", 234, 1, COLOR_MUTED);
+    drawCentered("SWIPE UP TO DISCOVER", 234, 1, COLOR_MUTED);
   } else {
     constexpr int16_t kFirstRowY = 92;
     constexpr int16_t kRowPitch = 35;
@@ -1747,9 +1767,70 @@ void drawFriendsPage() {
       display->printf("%08lX", (unsigned long)friendEntry.playerId);
     }
   }
+  drawFriendsFooter(0);
+}
 
-  drawBattleButton(18, 378, 154, 54, 16, COLOR_PURPLE, ICON_DEFEND, "HOST");
-  drawBattleButton(190, 378, 154, 54, 16, COLOR_CYAN, ICON_SPECIAL, "FIND");
+void drawFriendDiscoverablePage() {
+  paintPageBackdrop();
+  drawCentered("DISCOVERABLE", 18, 3, COLOR_MINT);
+  drawCentered("MY SIGNAL // 2 OF 3", 51, 1, COLOR_CYAN);
+  drawPanelGlow(36, 91, 296, 240, 28,
+                friendDiscoverable ? COLOR_MINT : COLOR_PURPLE);
+  display->fillRoundRect(36, 91, 296, 240, 28, COLOR_CARD);
+  display->drawRoundRect(43, 98, 282, 226, 22,
+                         friendDiscoverable ? COLOR_MINT : COLOR_PURPLE);
+  drawFriendsIcon(184, 151, friendDiscoverable ? COLOR_MINT : COLOR_MUTED);
+  drawCentered(friendDiscoverable ? "VISIBLE TO DIGIPETS" : "SIGNAL IS HIDDEN",
+               195, 2, friendDiscoverable ? COLOR_MINT : COLOR_TEXT);
+  drawCentered(friendDiscoverable ? "LOW DUTY // ABOUT 1 SEC" :
+                                    "ENABLE WHEN YOU WANT TO PAIR",
+               229, 1, COLOR_MUTED);
+  drawCentered(battle.status().c_str(), 252, 1,
+               friendDiscoverable ? COLOR_CYAN : COLOR_MUTED);
+  display->fillRoundRect(70, 270, 228, 64, 17,
+                         friendDiscoverable ? COLOR_DANGER : COLOR_MINT);
+  drawCentered(friendDiscoverable ? "STOP DISCOVERY" : "DISCOVER ME",
+               292, 2, readableTextColor(friendDiscoverable ? COLOR_DANGER : COLOR_MINT));
+  drawFriendsFooter(1);
+}
+
+void drawFriendsNearbyPage() {
+  paintPageBackdrop();
+  drawCentered("NEARBY", 18, 3, COLOR_MINT);
+  drawCentered("DIGIPET RADAR // 3 OF 3", 51, 1, COLOR_CYAN);
+  constexpr int16_t cx = 184, cy = 188;
+  for (uint8_t ring = 1; ring <= 3; ++ring) display->drawCircle(cx, cy, ring * 38, COLOR_MUTED);
+  display->drawLine(cx - 118, cy, cx + 118, cy, COLOR_MUTED);
+  display->drawLine(cx, cy - 118, cx, cy + 118, COLOR_MUTED);
+  display->fillCircle(cx, cy, 5, COLOR_MINT);
+  const auto &results = battle.scanResults();
+  for (size_t i = 0; i < results.size() && i < 8; ++i) {
+    const FamiliarBattleOpponent &peer = results[i];
+    const int strength = constrain(peer.rssi, -95, -40);
+    const int16_t radius = 22 + (-40 - strength) * (108 - 22) / 55;
+    const float angle = (i * 137 + (peer.playerId & 63)) * 0.0174532925f;
+    const int16_t x = cx + lroundf(cosf(angle) * radius);
+    const int16_t y = cy + lroundf(sinf(angle) * radius);
+    const uint16_t color = isFriendId(peer.playerId) ? COLOR_MINT : COLOR_WARNING;
+    display->fillCircle(x, y, 6, color);
+    display->drawCircle(x, y, 9, color);
+  }
+  char countText[28];
+  snprintf(countText, sizeof(countText), "%u SIGNALS // %s",
+           static_cast<unsigned>(results.size()),
+           results.empty() ? "SCAN TO SEARCH" : "RSSI RANGE");
+  drawCentered(countText, 286, 1, COLOR_TEXT);
+  drawBattleButton(18, 306, 154, 64, 16, COLOR_PURPLE, ICON_DEFEND, "SCAN");
+  drawBattleButton(190, 306, 154, 64, 16,
+                   results.empty() ? COLOR_MUTED : COLOR_CYAN,
+                   ICON_SPECIAL, "PAIR BEST");
+  drawFriendsFooter(2);
+}
+
+void drawFriendsPage() {
+  if (friendsPage == 0) drawFriendsDirectoryPage();
+  else if (friendsPage == 1) drawFriendDiscoverablePage();
+  else drawFriendsNearbyPage();
 }
 
 // HP/ATK/DEF/SPECIAL reuse existing glyph icons (drawStatIcon/

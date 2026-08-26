@@ -1140,41 +1140,72 @@ void handleBattleGridTap(int16_t x, int16_t y) {
 // prototype comment) -- hit-test regions key off that function's exact
 // 18/190,378 pair of rects. Any other tap closes the overlay, the same
 // "tap anywhere to return" Rivals/Recon Log already use.
-void handleFriendsTap(int16_t x, int16_t y) {
-  if (y >= 378 && y < 432) {
+void presentFriendsPage() {
+  if (transitionsReady) {
+    Arduino_GFX *previousDisplay = display;
+    display = &pageCanvasA;
+    drawFriendsPage();
+    display = previousDisplay;
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+  } else {
+    drawFriendsPage();
+  }
+}
+
+void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy) {
+  // Same vertical-dominance guard as the Genome Profile overlay's own
+  // swipe handling (gameHandleTap()'s genome-profile branch below) -- a
+  // diagonal or mostly-horizontal swipe shouldn't flip Friends' page.
+  if (abs(dy) > 55 && abs(dy) > abs(dx)) {
+    const uint8_t nextPage = dy < 0 ? min<uint8_t>(friendsPage + 1, 2)
+                                    : (friendsPage == 0 ? 0 : friendsPage - 1);
+    if (nextPage != friendsPage) {
+      friendsPage = nextPage;
+      playTone(dy < 0 ? 988 : 784, 30, 30);
+      presentFriendsPage();
+    }
+    return;
+  }
+  if (y >= 388) {
+    if (battle.state() != FamiliarBattleState::Idle) battle.end();
+    friendDiscoverable = false;
     showingFriends = false;
+    presentOverlayExit(drawFriendsPage, PAGE_BATTLE);
+    return;
+  }
+  if (friendsPage == 1 && y >= 270 && y < 334) {
     const FamiliarBattleCapabilities capabilities = battleCapabilities();
-    if (x < LCD_WIDTH / 2) {
+    if (!friendDiscoverable) {
       battle.beginHost(battlePlayerId(), pet.stage, 5, capabilities, nullptr,
                        FamiliarBattleMode::FriendExchange);
+      friendDiscoverable = battle.state() == FamiliarBattleState::Hosting;
     } else {
-      // Same blocking-scan treatment as the Battle Idle screen's own FIND
-      // button (handleBattleTap) -- a static frame while beginFind() blocks
-      // for its whole scan window -- but auto-connects to the
-      // first/strongest signal instead of showing the battle picker: a
-      // friend exchange is a "we're both here right now" interaction, not
-      // a pick-an-opponent one, and drawBattleResultsPage's "SELECT
-      // OPPONENT"/level framing doesn't fit it.
+      battle.end();
+      friendDiscoverable = false;
+    }
+    presentFriendsPage();
+    return;
+  }
+  if (friendsPage == 2 && y >= 306 && y < 370) {
+    const FamiliarBattleCapabilities capabilities = battleCapabilities();
+    if (x < LCD_WIDTH / 2) {
+      friendDiscoverable = false;
       Arduino_GFX *previousDisplay = display;
       if (transitionsReady) display = &pageCanvasA;
       paintPageBackdrop();
-      const PetPalette palette = paletteForGenome(pet.genome);
-      drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 170, 70,
-                           palette.glow);
-      drawCentered("SCANNING FOR FRIENDS", 260, 2, COLOR_CYAN);
-      drawCentered("4 SECOND SEARCH", 296, 1, COLOR_MUTED);
+      drawCentered("SCANNING NEARBY", 190, 2, COLOR_CYAN);
+      drawCentered("DIGIPET SIGNATURES ONLY", 224, 1, COLOR_MUTED);
       if (transitionsReady) {
         display = previousDisplay;
         panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
       }
       battle.beginFind(battlePlayerId(), pet.stage, 5, capabilities, nullptr,
                        FamiliarBattleMode::FriendExchange);
-      if (!battle.scanResults().empty()) battle.connectTo(0);
+    } else if (!battle.scanResults().empty()) {
+      battle.connectTo(0);  // results are RSSI-sorted, so index 0 is strongest.
     }
-    presentBattlePage();
-  } else {
-    showingFriends = false;
-    presentOverlayExit(drawFriendsPage, PAGE_BATTLE);
+    presentFriendsPage();
+    return;
   }
 }
 
@@ -1237,7 +1268,7 @@ void handleStatusGridTap(int16_t x, int16_t y) {
   } else if (tile >= 5) {
     // Reserved-for-later locked tiles -- nothing to do yet.
   } else {
-    performAction(tile);
+    performAction(tile);  // tile 0 (FEED), 1 (PLAY), or 2 (TRAIN).
   }
 }
 
@@ -1422,7 +1453,7 @@ void gameOverlayTouch(int16_t x, int16_t y, int16_t dx, int16_t dy, bool release
     return;
   }
   if (showingFriends) {
-    handleFriendsTap(x, y);
+    handleFriendsTap(x, y, dx, dy);
     return;
   }
   if (showingItems) {
