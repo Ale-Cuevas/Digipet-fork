@@ -1,3 +1,4 @@
+#include "power_telemetry.h"
 #include "game_module.h"
 
 #include <Arduino_GFX_Library.h>
@@ -520,7 +521,9 @@ FeedScanResult performFeedScan() {
 
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(false, false);
+  recordPowerEvent(PowerEvent::WifiScanStart);
   const int16_t found = WiFi.scanNetworks(false, false, false, 300);
+  recordPowerEvent(PowerEvent::WifiScanEnd);
   if (found > 0) {
     result.wifiCount = static_cast<uint8_t>(min<int16_t>(found, 255));
     for (int16_t i = 0; i < found; ++i) {
@@ -537,7 +540,9 @@ FeedScanResult performFeedScan() {
   delay(150);
 
   presentScanningPage(1);
+  recordPowerEvent(PowerEvent::BleScanStart);
   const std::vector<uint32_t> bleHashes = battle.scanNearbyBle(4000);
+  recordPowerEvent(PowerEvent::BleScanEnd);
   result.bleCount = static_cast<uint8_t>(min<size_t>(bleHashes.size(), 255));
   for (uint32_t hash : bleHashes) {
     if (reconLogRecord(hash, 1, nullptr)) ++result.newCount;
@@ -1125,7 +1130,9 @@ void handleBattleGridTap(int16_t x, int16_t y) {
       display = previousDisplay;
       panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
     }
+    recordPowerEvent(PowerEvent::BleScanStart);
     battle.beginFind(battlePlayerId(), pet.stage, 5, capabilities, genomeCode);
+    recordPowerEvent(PowerEvent::BleScanEnd);
     // Shows a picker instead of auto-connecting to whatever was found
     // first -- battleResultsPage was already reset the last time results
     // were cleared (beginFind()) or a pick was made, so it only needs
@@ -1178,6 +1185,7 @@ void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy) {
     if (!friendDiscoverable) {
       battle.beginHost(battlePlayerId(), pet.stage, 5, capabilities, nullptr,
                        FamiliarBattleMode::FriendExchange);
+      recordPowerEvent(PowerEvent::BleScanEnd);
       friendDiscoverable = battle.state() == FamiliarBattleState::Hosting;
     } else {
       battle.end();
@@ -1199,8 +1207,10 @@ void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy) {
         display = previousDisplay;
         panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
       }
+      recordPowerEvent(PowerEvent::BleScanStart);
       battle.beginFind(battlePlayerId(), pet.stage, 5, capabilities, nullptr,
                        FamiliarBattleMode::FriendExchange);
+      recordPowerEvent(PowerEvent::BleScanEnd);
     } else if (!battle.scanResults().empty()) {
       battle.connectTo(0);  // results are RSSI-sorted, so index 0 is strongest.
     }

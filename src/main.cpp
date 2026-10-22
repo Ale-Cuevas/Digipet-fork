@@ -19,6 +19,7 @@
 #include <Arduino_GFX_Library.h>
 
 #include "pin_config.h"
+#include "power_telemetry.h"
 #include "familiar_battle_service.h"
 #include "game_module.h"
 #include "ota_updater.h"
@@ -354,6 +355,22 @@ void updateBatteryReading() {
   externalPowerPresent = chargeState <= 0x04;
 }
 
+// Battery sampling remains on the existing schedule. Event timestamps and
+// activity snapshots do not perform additional I2C reads or radio operations.
+void recordPowerEvent(PowerEvent event) {
+  PowerSnapshot snapshot{};
+  snapshot.epoch = clockValid ? static_cast<uint32_t>(time(nullptr)) : 0;
+  snapshot.millivolts = batteryVoltageMv;
+  snapshot.percent = batteryPercent;
+  snapshot.brightness = screenOff ? 0 : brightnessLevel();
+  snapshot.page = static_cast<uint8_t>(currentPage);
+  snapshot.wifi = static_cast<uint8_t>(WiFi.getMode());
+  snapshot.battle = static_cast<uint8_t>(battle.state());
+  snapshot.flags = (externalPowerPresent ? 1 : 0) | (batteryCharging ? 2 : 0) |
+      (screenOff ? 4 : 0) | (pmuDetected && batteryVoltageMv ? 8 : 0);
+  powerTelemetryRecord(event, snapshot);
+}
+
 bool rtcRead(struct tm &value);
 
 // Last-observed-transition percentage/timestamp and the smoothed drain
@@ -586,6 +603,25 @@ void playChord(const uint16_t *frequencies, uint8_t voiceCount, uint16_t duratio
 // through the same I2S path playTone() already uses.
 extern const uint8_t boot_clip_pcm_start[] asm("_binary_src_assets_boot_clip_pcm_start");
 extern const uint8_t boot_clip_pcm_end[] asm("_binary_src_assets_boot_clip_pcm_end");
+
+// Six RGB565 frames sampled from Zeta's tail-pulse title animation. Keeping
+// them as display-native pixels makes playback deterministic and avoids
+// bringing a GIF decoder (and its additional frame buffers) into firmware.
+extern const uint8_t boot_mascot_0_start[] asm("_binary_src_assets_boot_mascot_0_rgb565_start");
+extern const uint8_t boot_mascot_1_start[] asm("_binary_src_assets_boot_mascot_1_rgb565_start");
+extern const uint8_t boot_mascot_2_start[] asm("_binary_src_assets_boot_mascot_2_rgb565_start");
+extern const uint8_t boot_mascot_3_start[] asm("_binary_src_assets_boot_mascot_3_rgb565_start");
+extern const uint8_t boot_mascot_4_start[] asm("_binary_src_assets_boot_mascot_4_rgb565_start");
+extern const uint8_t boot_mascot_5_start[] asm("_binary_src_assets_boot_mascot_5_rgb565_start");
+
+constexpr int16_t BOOT_MASCOT_WIDTH = 360;
+constexpr int16_t BOOT_MASCOT_HEIGHT = 270;
+constexpr int16_t BOOT_MASCOT_Y = 76;
+constexpr uint8_t BOOT_MASCOT_FRAME_COUNT = 6;
+const uint8_t *const BOOT_MASCOT_FRAMES[BOOT_MASCOT_FRAME_COUNT] = {
+    boot_mascot_0_start, boot_mascot_1_start, boot_mascot_2_start,
+    boot_mascot_3_start, boot_mascot_4_start, boot_mascot_5_start,
+};
 
 void bootClipTask(void *) {
   const uint8_t *data = boot_clip_pcm_start;
@@ -1210,27 +1246,20 @@ void bootAnimationFallback() {
 }
 
 void bootAnimation() {
-  if (!transitionsReady) {
-    bootAnimationFallback();
-    return;
-  }
-
   const uint32_t animationStarted = millis();
   constexpr uint32_t BOOT_DURATION_MS = 5200;
-  const PetPalette palette = gameBootAnimationPalette();
-  uint32_t particleSeed[4];
-  gameBootAnimationSeed(particleSeed);
+  // The source GIF's 28 frames run for 2.4 seconds. Six evenly sampled
+  // display-native frames at 400ms each preserve that complete loop cadence.
+  constexpr uint32_t MASCOT_FRAME_MS = 400;
   panel->setBrightness(180);
-  paintBootBackdrop(palette);
   pinMode(0, INPUT_PULLUP);  // lets a power-key press fast-forward the sequence
   playBootClipAsync();
 
-  const size_t frameBytes = static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t);
   float progress = 0.0f;
   bool skipping = false;
-  for (uint32_t frame = 0; ; ++frame) {
+  for (;;) {
+    const uint32_t elapsed = millis() - animationStarted;
     if (!skipping) {
-      const uint32_t elapsed = millis() - animationStarted;
       progress = min(1.0f, elapsed / static_cast<float>(BOOT_DURATION_MS));
       if (elapsed > 250 && digitalRead(0) == LOW) skipping = true;
     } else {
@@ -1238,21 +1267,42 @@ void bootAnimation() {
     }
 
     Arduino_GFX *previousDisplay = display;
-    display = &pageCanvasA;
-    memcpy(pageCanvasA.getFramebuffer(), pageCanvasB.getFramebuffer(), frameBytes);
-    drawBootParticles(palette, frame, particleSeed);
-    drawBootHelix(palette, frame, progress);
-    drawBootCore(palette, frame, progress);
-    drawBootTitle(progress);
+    if (transitionsReady) display = &pageCanvasA;
+    display->fillScreen(COLOR_BACKGROUND);
+    drawCentered("DIGIPET // BOOT", 28, 2, COLOR_MINT);
+    const uint8_t mascotFrame = (elapsed / MASCOT_FRAME_MS) % BOOT_MASCOT_FRAME_COUNT;
+    display->draw16bitRGBBitmap(
+        0, BOOT_MASCOT_Y,
+        reinterpret_cast<const uint16_t *>(BOOT_MASCOT_FRAMES[mascotFrame]),
+        BOOT_MASCOT_WIDTH, BOOT_MASCOT_HEIGHT);
     drawBootStatus(progress);
-    display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    if (transitionsReady) {
+      display = previousDisplay;
+      panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    }
 
     if (progress >= 1.0f) break;
     delay(18);
   }
 
-  bootOutro(palette);
+  // Resolve on the mascot/title card rather than cutting back to the old
+  // generic badge. The wordmark is part of the supplied artwork, so its
+  // hand-drawn lettering remains exact instead of being approximated by a
+  // built-in bitmap font.
+  Arduino_GFX *previousDisplay = display;
+  if (transitionsReady) display = &pageCanvasA;
+  display->fillScreen(COLOR_BACKGROUND);
+  drawCentered("DIGIPET // BOOT", 28, 2, COLOR_MINT);
+  display->draw16bitRGBBitmap(
+      0, BOOT_MASCOT_Y,
+      reinterpret_cast<const uint16_t *>(BOOT_MASCOT_FRAMES[0]),
+      BOOT_MASCOT_WIDTH, BOOT_MASCOT_HEIGHT);
+  drawCentered("LIFE SIGNAL ONLINE", 398, 2, COLOR_CYAN);
+  if (transitionsReady) {
+    display = previousDisplay;
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+  }
+  delay(450);
 }
 
 bool i2cPresent(uint8_t address) {
@@ -1458,9 +1508,11 @@ void renderPageToCanvas(Page page, Arduino_Canvas &canvas) {
 // canvas so the live display is never disturbed; every override is applied
 // to a copy of the live genome and restored immediately after.
 void serviceSerialDebug() {
-  if (!transitionsReady || !Serial.available()) return;
+  if (!Serial.available()) return;
   String line = Serial.readStringUntil('\n');
   line.trim();
+  if (line == "POWERLOG") { powerTelemetryDump(); return; }
+  if (!transitionsReady) return;
   if (line == "WHOAMI") {
     Serial.printf("WHOAMI stage=%u age=%lu actions=%lu bodyType=%u lineage=%u "
                   "design=%016llX battleW=%lu battleL=%lu battleFled=%lu "
@@ -2026,6 +2078,7 @@ void enterSleep() {
 // GPIO0 is the board's active-low boot button and is also an ESP32-S3 RTC
 // GPIO, so it can wake the chip directly without periodic timer reboots.
 void enterDeepIdle() {
+  recordPowerEvent(PowerEvent::Sleep);
   // Configure the pin through the RTC block explicitly. Keeping RTC_PERIPH
   // powered is required for the internal pull-up to remain active; otherwise
   // GPIO0 can float low in deep sleep and immediately wake the chip again.
@@ -2124,6 +2177,7 @@ void setup() {
                 static_cast<unsigned long long>(esp_sleep_get_ext1_wakeup_status()));
   Wire.begin(IIC_SDA, IIC_SCL);
   preferences.begin("digipet", false);
+  powerTelemetryBegin(resumingFromDeepIdle);
   loadSettings();
   loadPet();
   loadCopiedGenome();
@@ -2216,6 +2270,8 @@ void setup() {
   // loop()'s own poll gets to it.
   updateBatteryReading();
   updateBatteryTimeEstimate();
+  recordPowerEvent(resumingFromDeepIdle ? PowerEvent::Wake : PowerEvent::Boot);
+  if (externalPowerPresent) recordPowerEvent(PowerEvent::PowerConnected);
   Serial.printf("Battery: %s (%umV, %u%%)\n", pmuDetected ? "AXP2101 ready" : "PMU not found",
                 batteryVoltageMv, batteryPercent);
   pinMode(0, INPUT_PULLUP);
@@ -2253,6 +2309,18 @@ void loop() {
   // the sleeping-gated branches below.
   const uint32_t now = millis();
   serviceSerialDebug();
+  static uint32_t lastTelemetryState = 0;
+  static uint32_t lastTelemetryCheck = 0;
+  if (now - lastTelemetryCheck >= 1000) {
+    lastTelemetryCheck = now;
+    const uint32_t state = static_cast<uint8_t>(currentPage) |
+        (static_cast<uint32_t>(battle.state()) << 8) |
+        (static_cast<uint32_t>(brightnessLevel()) << 16);
+    if (state != lastTelemetryState) {
+      lastTelemetryState = state;
+      recordPowerEvent(PowerEvent::State);
+    }
+  }
   if (currentPage == PAGE_BATTLE && battle.state() != FamiliarBattleState::Idle) {
     battle.update();
     if (battle.state() != lastBattleState || battle.turnNumber() != lastBattleTurn ||
@@ -2303,8 +2371,16 @@ void loop() {
   // unplugging the cable can hand off to real deep sleep.
   if ((!sleeping || screenOff) && now - lastBatteryPoll >= 30000) {
     lastBatteryPoll = now;
+    const bool wasExternal = externalPowerPresent;
     updateBatteryReading();
     updateBatteryTimeEstimate();
+    if (wasExternal != externalPowerPresent)
+      recordPowerEvent(externalPowerPresent ? PowerEvent::PowerConnected : PowerEvent::PowerRemoved);
+    static uint32_t lastTelemetrySample = 0;
+    if (now - lastTelemetrySample >= 60000) {
+      lastTelemetrySample = now;
+      recordPowerEvent(PowerEvent::Sample);
+    }
     if (sleeping && screenOff && !externalPowerPresent) {
       Serial.println("External power removed while display was off; entering deep sleep");
       enterDeepIdle();
