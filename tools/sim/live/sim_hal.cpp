@@ -31,6 +31,8 @@
 
 void setup();
 void loop();
+// src/main.cpp's idle-timeout reference point; see holdScreenAwake().
+extern uint32_t lastInteraction;
 
 // RTC slow memory: every RTC_DATA_ATTR variable lands in this section (see
 // fakes/esp_attr.h). Weak so a build with none still links.
@@ -50,6 +52,7 @@ struct Options {
   int scale = 1;
   double speed = 1.0;
   double fastForward = 60.0;
+  double idleMinutes = -1.0;  // unset: 10 interactive, 0 (firmware's own) for scripts
   bool usbPower = false;
   bool fresh = false;
 };
@@ -95,6 +98,8 @@ esp_reset_reason_t resetReason = ESP_RST_POWERON;
 
 Clock::time_point lastPresent;
 Clock::time_point lastTitle;
+Clock::time_point lastActivity = Clock::now();
+uint32_t lastInteractionWritten = 0;
 
 void setTouch(bool held, int16_t x, int16_t y) {
   touchHeld = held;
@@ -428,6 +433,23 @@ void restoreAfterReexec() {
   }
 }
 
+// --- Idle timeout ------------------------------------------------------------
+
+// The firmware's idle timeout (Settings: 15 s to 2 min) is tuned for a tiny
+// battery and is too short for working on the UI at a desk. Until
+// --idle minutes of wall-clock time have passed since the firmware last
+// registered a touch or wake, keep its lastInteraction current; after that,
+// stop, and its own timeout runs out as on the board. The power key still
+// sleeps immediately. Wall-clock so fast-forward doesn't shorten it.
+void holdScreenAwake() {
+  if (options.idleMinutes <= 0) return;
+  const auto now = Clock::now();
+  if (::lastInteraction != lastInteractionWritten) lastActivity = now;  // touch or wake
+  if (now - lastActivity < std::chrono::duration<double, std::ratio<60>>(options.idleMinutes)) {
+    ::lastInteraction = lastInteractionWritten = millis();
+  }
+}
+
 // --- Window ------------------------------------------------------------------
 
 void updateTitle() {
@@ -493,14 +515,15 @@ void printHelp() {
       "  - / =        battery -10%% / +10%%\n"
       "  S            screenshot to %s/\n"
       "  R            power-cycle (cold boot)\n"
+      "  idle         screen sleeps after %g min without touch (--idle; 0 = firmware's setting)\n"
       "  Esc          quit\n"
       "  terminal     type serial debug commands (WHOAMI, POWERLOG, SIMBATTLE 1 ...)\n\n",
-      options.fastForward, options.dataDir.c_str());
+      options.fastForward, options.dataDir.c_str(), options.idleMinutes);
 }
 
 void usage(const char *program) {
   fprintf(stderr,
-          "usage: %s [--scale N] [--speed X] [--ff X] [--usb] [--fresh]\n"
+          "usage: %s [--scale N] [--speed X] [--ff X] [--idle MIN] [--usb] [--fresh]\n"
           "          [--data DIR] [--script FILE]\n",
           program);
   exit(2);
@@ -517,6 +540,7 @@ void parseArgs(int argc, char **argv) {
     if (arg == "--scale") options.scale = std::max(1, atoi(next()));
     else if (arg == "--speed") options.speed = std::max(0.1, atof(next()));
     else if (arg == "--ff") options.fastForward = std::max(1.0, atof(next()));
+    else if (arg == "--idle") options.idleMinutes = std::max(0.0, atof(next()));
     else if (arg == "--usb") options.usbPower = true;
     else if (arg == "--fresh") options.fresh = true;
     else if (arg == "--data") options.dataDir = next();
@@ -554,6 +578,7 @@ void pump() {
   if (!onMainThread()) return;
   processInput();
   runScript();
+  holdScreenAwake();
   const auto now = Clock::now();
   if (now - lastPresent >= std::chrono::milliseconds(16)) {
     lastPresent = now;
@@ -773,6 +798,7 @@ int main(int argc, char **argv) {
   }
   nvsLoad();
   if (!options.scriptPath.empty() && !loadScript(options.scriptPath)) return 2;
+  if (options.idleMinutes < 0) options.idleMinutes = script.empty() ? 10.0 : 0.0;
 
   for (uint8_t address : {BOARD_I2C_ADDR_TOUCH, BOARD_I2C_ADDR_PMIC, BOARD_I2C_ADDR_IMU,
                           BOARD_I2C_ADDR_RTC, BOARD_I2C_ADDR_ES8311, BOARD_I2C_ADDR_ES7210}) {

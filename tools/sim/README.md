@@ -136,7 +136,16 @@ tools/sim/live/run.sh --usb            # start on USB power (no deep sleep on id
 tools/sim/live/run.sh --scale 2        # 960x960 window
 tools/sim/live/run.sh --fresh          # wipe the save, new egg
 tools/sim/live/run.sh --speed 60       # start fast-forwarded (pet decay 60x)
+tools/sim/live/run.sh --idle 30        # screen stays on 30 min without touch
+tools/sim/live/run.sh --idle 0         # the firmware's own idle timeout (Settings)
 ```
+
+On the board the screen sleeps after the Settings idle timeout (15 s by
+default, 2 min at most). That's too short for working on the UI, so the sim
+keeps the screen on for `--idle` minutes (default 10) after your last touch
+or wake. After that the firmware's own timeout runs as normal. The limit is
+wall-clock, so fast-forward doesn't shorten it, and the power key still
+sleeps immediately.
 
 | Input | Board equivalent |
 |---|---|
@@ -207,6 +216,7 @@ quit
 tools/sim/live/run.sh --usb --fresh --script my_flow.txt
 ```
 
+Scripts use the firmware's own idle timeout unless you pass `--idle`.
 Use `--usb` unless the script is testing sleep: on battery the default
 15-second idle timeout puts the board into deep sleep. A script does keep
 running through it, and its next `key` step wakes the board.
