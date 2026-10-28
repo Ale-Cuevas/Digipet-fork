@@ -99,12 +99,12 @@ Other projects (TamaFi, Catode32, Pixel Pets) are **reference only** for ideas; 
 - [ ] Init IMU (QMI8658), RTC (PCF85063), buttons (GPIO18, BOOT). (Compiles, plus PWR sensed on GPIO16; device check in `docs/DEVICE_TESTS.md`.)
 
 ### Phase 2 — Port the pet app
-- [ ] Make `[env:waveshare_amoled_216]` build the pet app instead of only the bring-up firmware, and **remove the 1.8" target**: the `waveshare_amoled_v2` env, `src/pin_config.h`, the XCA9554 expander code and lib, the CST816x touch path, and SD_MMC. Keep the bring-up firmware available (e.g. its own `waveshare_amoled_216_bringup` env) as a hardware test.
-- [ ] Replace/adjust the display layer so the pet UI renders at 480×480 (scale sprites or redesign layout; keep UI sizes in constants).
-- [ ] Map the base repo's input to touch + buttons on this board.
-- [ ] Port save/load (flash or SD) and the timekeeping (use the RTC for time between boots).
-- [ ] Verify pet stats decay and persist across reboots.
-- [ ] Verify Wi-Fi/BLE features still work on this board.
+- [ ] Make `[env:waveshare_amoled_216]` build the pet app instead of only the bring-up firmware, and **remove the 1.8" target**: the `waveshare_amoled_v2` env, `src/pin_config.h`, the XCA9554 expander code and lib, the CST816x touch path, and SD_MMC. Keep the bring-up firmware available (e.g. its own `waveshare_amoled_216_bringup` env) as a hardware test. (Done 2026-10-28 on branch `phase2-pet-app`, compile-only; device check in `docs/DEVICE_TESTS.md`.)
+- [ ] Replace/adjust the display layer so the pet UI renders at 480×480 (scale sprites or redesign layout; keep UI sizes in constants). (Native 480×480 layout, shared geometry in `include/ui_layout.h`, checked with tools/sim; device check in `docs/DEVICE_TESTS.md`.)
+- [ ] Map the base repo's input to touch + buttons on this board. (CST92xx touch; BOOT and USER keys are the power key and deep-sleep wake. Compiles; device check in `docs/DEVICE_TESTS.md`.)
+- [ ] Port save/load (flash or SD) and the timekeeping (use the RTC for time between boots). (NVS saves unchanged; SD over SPI; RTC read at boot/resume as before. Compiles; device check in `docs/DEVICE_TESTS.md`.)
+- [ ] Verify pet stats decay and persist across reboots. (Device only; listed in `docs/PENDING_TESTS.md`.)
+- [ ] Verify Wi-Fi/BLE features still work on this board. (Device only; listed in `docs/PENDING_TESTS.md`.)
 
 ### Phase 3 — Power
 - [ ] Read battery voltage/percent from the AXP2101 and show it in the UI.

@@ -1,4 +1,35 @@
-# Digipet architecture (as forked, before the 2.16" port)
+# Digipet architecture
+
+## After the Phase 2 port (2026-10-28)
+
+The fork now targets only the Waveshare ESP32-S3-Touch-AMOLED-2.16. The rest
+of this file is the Phase 0 snapshot of the code as forked; where it
+disagrees with the list below, the list wins.
+
+- **Envs:** `waveshare_amoled_216` builds the pet app,
+  `waveshare_amoled_216_bringup` builds the standalone hardware test in
+  `src/bringup_216/`, `native` runs the host unit tests. The 1.8" env is gone.
+- **Hardware facts:** every pin and I2C address is in
+  `include/board_amoled_216.h`. `src/pin_config.h` is gone.
+- **Display:** same vendored CO5300 QSPI driver, 480x480, reset on GPIO39,
+  MADCTL 0xA0 as in Waveshare's demo.
+- **UI layout:** the UI fills the panel. `include/ui_layout.h` holds the UI
+  size and all geometry shared by drawing code and touch hit-tests (tile
+  grid, battle buttons, BACK button, settings lists, ...), including the
+  `uiTileAt()` and `battleMoveAt()` hit-test helpers.
+- **Touch:** CST92xx through SensorLib (`TouchDrvCST92xx`), INT on GPIO11 as a
+  "something is touching" gate, then polled every 25 ms until release.
+  Arduino_DriveBus is gone.
+- **No I/O expander:** the XCA9554 code and lib are gone; display and touch
+  reset are plain GPIOs and the SD slot is always powered.
+- **SD:** `SD` over its own SPI bus (HSPI; the display's QSPI bus has SPI2).
+- **PMIC:** XPowersLib init with the demo's 4.2 V charge target; the battery
+  readout still uses raw AXP2101 register reads (Phase 3 moves it over).
+- **Buttons:** BOOT (GPIO0) and the user key (GPIO18) are both the power key
+  and both wake from deep sleep (EXT1 ANY_LOW).
+- **OTA target:** `waveshare-esp32-s3-touch-amoled-2.16`.
+
+## As forked (Phase 0 snapshot)
 
 Snapshot of the code at upstream commit `0e4514a` (Zetascrub/Digipet), written
 to plan the port to the Waveshare ESP32-S3-Touch-AMOLED-2.16. Line numbers are

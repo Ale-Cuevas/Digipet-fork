@@ -5,11 +5,11 @@ passes on the device. If one fails, note what you saw next to it.
 
 ## Waveshare ESP32-S3-Touch-AMOLED-2.16: Phase 1 bring-up
 
-Flash and watch the log:
+The bring-up firmware has its own env. Flash it and watch the log:
 
 ```
-pio run -e waveshare_amoled_216 -t upload
-pio device monitor -e waveshare_amoled_216
+pio run -e waveshare_amoled_216_bringup -t upload
+pio device monitor -e waveshare_amoled_216_bringup
 ```
 
 ### Power (AXP2101)
@@ -50,3 +50,74 @@ pio device monitor -e waveshare_amoled_216
 - [ ] Press and release the **user key** (Key3): `[btn] USER down` / `up`.
 - [ ] Short-press **PWR**: `[btn] PWR down` / `up`. If it reads inverted (down at rest), the GPIO16 sense level in `BOARD_BTN_PWR_PRESSED_LEVEL` is wrong; note it. **Don't hold PWR**: a long press may make the AXP2101 cut power.
 - [ ] The `BTN:` line on screen follows each press within 2 s.
+
+## Waveshare ESP32-S3-Touch-AMOLED-2.16: Phase 2 pet app
+
+Do the Phase 1 bring-up checks first: if touch or the display is wrong
+there, fix the `BOARD_*` values in `include/board_amoled_216.h` before
+testing the app. Then flash the pet firmware and watch the log:
+
+```
+pio run -e waveshare_amoled_216 -t upload
+pio device monitor -e waveshare_amoled_216
+```
+
+Useful serial commands while testing (see `serviceSerialDebug()` in
+`src/main.cpp`): `DUMP`, `DUMPBIOS <phase>`, `DUMPBATTLE <phase>` and
+`DUMPSCAN <page> <count>` render a screen off-panel and send it back as
+`FBDUMP 480 480` followed by the raw RGB565 frame. That is the way to look
+at screens tools/sim can't render (boot log, battle scanning/hosting)
+without catching them live. `POWERLOG` prints the power event log.
+
+### Boot and display
+- [ ] Serial shows `Digipet firmware v...`, `PMU` / `QMI8658` / `RTC` / `CODEC` detection lines, `Touch: CST92xx ready` (model name may differ) and `PSRAM: ... smooth transitions: ready`.
+- [ ] The boot animation plays centered on the screen, with nothing cut off at any edge.
+- [ ] The Companion page fills the whole 480x480 screen: title at the top, creature or egg centered in its card, the clock at top right, page dots near the bottom edge and fully visible.
+- [ ] Swiping left/right moves through Companion, Status, PVP, Settings and Genome Lab. Each page fits the screen; compare with `tools/sim/render.sh <page>` output if unsure.
+- [ ] The slide transitions between pages are smooth (no tearing bands or half-drawn frames).
+
+### Touch targets
+- [ ] Status page, swipe up: tapping each of the 4 action tiles flashes that tile (the highlight lines up with the tile edges) and opens the right action.
+- [ ] Settings home: each tile opens its own sub-view, on both grid pages (swipe up/down to switch).
+- [ ] Settings > Brightness: every one of the 11 cells is tappable and the brightness changes. Settings > Idle timer, Volume, Theme, Boot effect: every row selects, and BACK returns.
+- [ ] Companion: tapping the creature card opens the Genome Profile. Long-pressing the creature (about 1 s) opens Evolution Debug; ADVANCE and CANCEL both work.
+- [ ] Genome Profile data view: EXPORT and IMPORT COPY respond, BACK returns.
+- [ ] Genome Lab: RANDOM, CLONE and BLEND each respond to a tap in their own third of the screen.
+- [ ] Items and Recon Log open from the Status action grid; Items rows and BACK respond.
+- [ ] A swipe that starts right at the screen edge still counts as a swipe.
+
+### Buttons, sleep and wake
+- [ ] Short-press **BOOT** while awake: the screen goes to sleep. Press **BOOT** again: it wakes with the "Link restored" toast.
+- [ ] Same with the **user key** (Key3, GPIO18).
+- [ ] On battery (USB unplugged): sleep enters deep sleep (serial ends with `entering deep sleep`). Each key on its own wakes it, and the log shows `Wake cause: ...; EXT1 status: ...` with the matching GPIO bit (bit 0 for BOOT, bit 18 for USER).
+- [ ] On USB: sleep only turns the display off; a key press brings it back.
+- [ ] Let the idle timer run out: the device sleeps by itself.
+- [ ] The device does not wake on its own in deep sleep (leave it 5 minutes). If it does, a key line is floating low.
+
+### Audio (ES8311)
+- [ ] The boot clip plays during the boot animation; tones play on taps and page changes.
+- [ ] Settings > Volume changes loudness; MUTE silences everything.
+- [ ] No constant hiss or hum from the speaker while idle.
+
+### SD card over SPI
+- [ ] With a card holding `/digipet/wifi.ini` (see `sd-card/`), a cold boot logs `SD: Wi-Fi configuration valid`, connects and syncs the clock (Status/Companion shows the right time).
+- [ ] With no card, boot logs `SD: card mount failed or no card present` and carries on.
+- [ ] Genome Profile > EXPORT writes `/digipet/genome.txt`; IMPORT COPY reads it back ("COPIED GENOME READY").
+
+### Time, stats and saves
+- [ ] After an NTP sync, press RESET: the clock is still right (read from the PCF85063).
+- [ ] After a deep-sleep cycle on battery, the clock is still right without Wi-Fi.
+- [ ] Leave the pet awake for 5+ minutes: FOOD/JOY/ENERGY drop on the Status page.
+- [ ] Feed or play, note the stats, press RESET: the stats, stage and settings come back the same.
+
+### Battery readout (AXP2101)
+- [ ] Status page shows a battery percentage close to the bring-up firmware's `[pmu]` reading, and serial logs `Battery: AXP2101 ready (...mV, ...%)` at boot.
+- [ ] Plugging/unplugging USB updates the charging state within about 30 s.
+
+### Wi-Fi and BLE
+- [ ] Status > FEED runs the Wi-Fi + BLE scan and finds nearby networks/devices; Recon Log lists them.
+- [ ] With a second Digipet (or `share/vpet-battle/vpet_battle_simulator.py`): HOST on one, FIND on the other, pick it from the opponent list, play a battle through to BATTLE COMPLETE. Move buttons respond to taps and flash when pressed.
+- [ ] Friends: DISCOVER ME on one device, SCAN / PAIR BEST on the other: "FRIEND ADDED" appears and the friend shows in the directory.
+
+### OTA
+- [ ] Settings > FIRMWARE checks for an update without crashing. Only images whose manifest target is `waveshare-esp32-s3-touch-amoled-2.16` are accepted.
