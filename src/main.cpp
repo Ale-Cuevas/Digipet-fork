@@ -59,12 +59,9 @@ const char *STAGE_NAMES[] = {"BIT EGG", "HATCHLING", "SCOUT", "GUARDIAN", "TITAN
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
     BOARD_LCD_CS, BOARD_LCD_SCLK, BOARD_LCD_SDIO0, BOARD_LCD_SDIO1, BOARD_LCD_SDIO2, BOARD_LCD_SDIO3);
-// The driver's column/row offsets place the UI window on the panel (see
-// ui_layout.h), so every draw and blit below works in UI coordinates.
 Arduino_CO5300 *panel = new Arduino_CO5300(
-    bus, BOARD_LCD_RESET, 0, UI_WIDTH, UI_HEIGHT,
-    BOARD_LCD_COL_OFFSET + UI_ORIGIN_X, BOARD_LCD_ROW_OFFSET + UI_ORIGIN_Y,
-    BOARD_LCD_COL_OFFSET + UI_ORIGIN_X, BOARD_LCD_ROW_OFFSET + UI_ORIGIN_Y);
+    bus, BOARD_LCD_RESET, 0, BOARD_LCD_WIDTH, BOARD_LCD_HEIGHT,
+    BOARD_LCD_COL_OFFSET, BOARD_LCD_ROW_OFFSET, BOARD_LCD_COL_OFFSET, BOARD_LCD_ROW_OFFSET);
 Arduino_GFX *display = panel;
 Arduino_Canvas pageCanvasA(UI_WIDTH, UI_HEIGHT, panel);
 Arduino_Canvas pageCanvasB(UI_WIDTH, UI_HEIGHT, panel);
@@ -326,14 +323,13 @@ bool initTouch() {
   return true;
 }
 
-// Reads the first touch point in UI coordinates. Points in the panel
-// margin around the UI window are clamped to its edge, so a swipe that
-// starts there still counts. Returns false when no finger is down.
+// Reads the first touch point, clamped to the screen. Returns false when
+// no finger is down.
 bool readTouchPoint(int32_t &x, int32_t &y) {
   int16_t xs[2], ys[2];
   if (touch.getPoint(xs, ys, 1) == 0) return false;
-  x = constrain(xs[0] - UI_ORIGIN_X, 0, UI_WIDTH - 1);
-  y = constrain(ys[0] - UI_ORIGIN_Y, 0, UI_HEIGHT - 1);
+  x = constrain(xs[0], 0, UI_WIDTH - 1);
+  y = constrain(ys[0], 0, UI_HEIGHT - 1);
   return true;
 }
 
@@ -673,7 +669,8 @@ extern const uint8_t boot_mascot_5_start[] asm("_binary_src_assets_boot_mascot_5
 
 constexpr int16_t BOOT_MASCOT_WIDTH = 360;
 constexpr int16_t BOOT_MASCOT_HEIGHT = 270;
-constexpr int16_t BOOT_MASCOT_Y = 76;
+constexpr int16_t BOOT_MASCOT_X = (UI_WIDTH - BOOT_MASCOT_WIDTH) / 2;
+constexpr int16_t BOOT_MASCOT_Y = 88;
 constexpr uint8_t BOOT_MASCOT_FRAME_COUNT = 6;
 const uint8_t *const BOOT_MASCOT_FRAMES[BOOT_MASCOT_FRAME_COUNT] = {
     boot_mascot_0_start, boot_mascot_1_start, boot_mascot_2_start,
@@ -837,9 +834,9 @@ struct BootLogEntry {
   uint16_t color;
 };
 constexpr uint8_t BOOT_LOG_MAX = 6;
-constexpr int16_t BOOT_LOG_X = 34;
-constexpr int16_t BOOT_LOG_TOP = 156;
-constexpr int16_t BOOT_LOG_LINE_H = 32;
+constexpr int16_t BOOT_LOG_X = 44;
+constexpr int16_t BOOT_LOG_TOP = 167;
+constexpr int16_t BOOT_LOG_LINE_H = 34;
 constexpr int16_t BOOT_LOG_SPIN_X = 310;
 BootLogEntry bootLog[BOOT_LOG_MAX];
 uint8_t bootLogCount = 0;
@@ -861,15 +858,15 @@ void drawBootLogScreen() {
   Arduino_GFX *previousDisplay = display;
   if (transitionsReady) display = &pageCanvasA;
   display->fillScreen(COLOR_BACKGROUND);
-  drawCentered("SYSTEM BOOT", 60, 3, COLOR_MINT);
-  drawCentered("STARTUP DIAGNOSTICS", 96, 1, COLOR_CYAN);
+  drawCentered("SYSTEM BOOT", 64, 3, COLOR_MINT);
+  drawCentered("STARTUP DIAGNOSTICS", 103, 1, COLOR_CYAN);
   display->setTextSize(2);
   for (uint8_t i = 0; i < bootLogCount; ++i) {
     display->setTextColor(bootLog[i].color);
     display->setCursor(BOOT_LOG_X, BOOT_LOG_TOP + i * BOOT_LOG_LINE_H);
     display->print(bootLog[i].text);
   }
-  drawCentered("OFFLINE PLAY REMAINS AVAILABLE", 404, 1, COLOR_MUTED);
+  drawCentered("OFFLINE PLAY REMAINS AVAILABLE", 433, 1, COLOR_MUTED);
   if (transitionsReady) {
     display = previousDisplay;
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
@@ -899,7 +896,7 @@ void bootLogUpdateLast(const char *label, const char *status, uint16_t color) {
 // (measured, not a fixed column, so it doesn't float in a gap after short
 // status words), drawn straight to the live panel rather than through a
 // full-frame canvas blit — this is the same lesson as the old circular
-// spinner: a ~20x20px update every ~100ms is fine, but a 329KB blit at that
+// spinner: a ~20x20px update every ~100ms is fine, but a 450KB blit at that
 // rate stacks extra SPI traffic right on top of Wi-Fi's own bus contention
 // and causes hitches.
 void bootLogSpin(uint8_t frame) {
@@ -912,7 +909,7 @@ void bootLogSpin(uint8_t frame) {
   display->getTextBounds(bootLog[bootLogCount - 1].text, BOOT_LOG_X, y,
                          &boundsX, &boundsY, &textW, &textH);
   const int16_t glyphX = BOOT_LOG_X + textW + 12;
-  display->fillRect(glyphX, y - 2, 22, 20, COLOR_BACKGROUND);
+  display->fillRect(glyphX, y - 2, 29, 21, COLOR_BACKGROUND);
   display->setTextColor(bootLog[bootLogCount - 1].color);
   display->setCursor(glyphX, y);
   display->print(glyphs[frame % 4]);
@@ -1126,9 +1123,9 @@ void drawBootParticles(const PetPalette &palette, uint32_t frame, const uint32_t
     const uint8_t place = (seedWord >> ((i * 5) % 24)) & 0xFF;
     const int16_t x = 26 + (place % (UI_WIDTH - 52));
     const float speed = 0.35f + (i % 5) * 0.12f;
-    const float travel = fmodf(rise * speed + i * 37.0f, 300.0f);
-    const int16_t y = 344 - static_cast<int16_t>(travel);
-    if (y < 96) continue;
+    const float travel = fmodf(rise * speed + i * 37.0f, 321.0f);
+    const int16_t y = 368 - static_cast<int16_t>(travel);
+    if (y < 103) continue;
     const float twinkle = (sinf(frame * 0.09f + i * 1.7f) + 1.0f) * 0.5f;
     display->fillCircle(x, y, (i & 3) == 0 ? 2 : 1,
                         lerpRgb565(palette.secondary, palette.glow, twinkle));
@@ -1186,8 +1183,8 @@ void drawBootCore(const PetPalette &palette, uint32_t frame, float progress) {
 
 void drawBootTitle(float progress) {
   const float fadeT = bootSmoothstep(0.0f, 0.14f, progress);
-  drawCentered("DIGIPET", 30, 3, lerpRgb565(COLOR_BACKGROUND, COLOR_TEXT, fadeT));
-  drawCentered("GENETIC LIFE INTERFACE", 66, 1, lerpRgb565(COLOR_BACKGROUND, COLOR_CYAN, fadeT));
+  drawCentered("DIGIPET", 32, 3, lerpRgb565(COLOR_BACKGROUND, COLOR_TEXT, fadeT));
+  drawCentered("GENETIC LIFE INTERFACE", 71, 1, lerpRgb565(COLOR_BACKGROUND, COLOR_CYAN, fadeT));
 }
 
 void drawBootStatus(float progress) {
@@ -1207,7 +1204,7 @@ void drawBootStatus(float progress) {
                           progress < 0.58f ? "ASSEMBLING FORM" :
                           progress < 0.90f ? "STABILISING SIGNAL" :
                                              "LINK READY";
-  drawCentered(phaseText, 410, 1, progress > 0.89f ? COLOR_MINT : COLOR_MUTED);
+  drawCentered(phaseText, 439, 1, progress > 0.89f ? COLOR_MINT : COLOR_MUTED);
 }
 
 // Eases the helix/core into the resting badge logo instead of hard-cutting
@@ -1222,15 +1219,15 @@ void bootOutro(const PetPalette &palette) {
 
     display->fillScreen(lerpRgb565(startWash, COLOR_BACKGROUND, eased));
     const int16_t ringOuter = lroundf(78 + eased * 23);
-    display->fillCircle(BOOT_CX, 202, lroundf(66 + eased * 22), COLOR_CARD);
-    display->drawCircle(BOOT_CX, 202, ringOuter, COLOR_CYAN);
-    display->drawCircle(BOOT_CX, 202, ringOuter + 10, COLOR_PURPLE);
-    display->fillCircle(BOOT_CX, 202, lroundf(40 + eased * 14), lerpRgb565(palette.primary, palette.glow, eased));
-    display->fillCircle(BOOT_CX, 202, lroundf(24 + eased * 10), COLOR_BACKGROUND);
-    display->fillCircle(BOOT_CX, 202, lroundf(8 + eased * 7), COLOR_TEXT);
+    display->fillCircle(BOOT_CX, 216, lroundf(66 + eased * 22), COLOR_CARD);
+    display->drawCircle(BOOT_CX, 216, ringOuter, COLOR_CYAN);
+    display->drawCircle(BOOT_CX, 216, ringOuter + 10, COLOR_PURPLE);
+    display->fillCircle(BOOT_CX, 216, lroundf(40 + eased * 14), lerpRgb565(palette.primary, palette.glow, eased));
+    display->fillCircle(BOOT_CX, 216, lroundf(24 + eased * 10), COLOR_BACKGROUND);
+    display->fillCircle(BOOT_CX, 216, lroundf(8 + eased * 7), COLOR_TEXT);
 
-    drawCentered("DIGIPET", 315, 5, lerpRgb565(COLOR_BACKGROUND, COLOR_TEXT, eased));
-    drawCentered("LIFE SIGNAL ONLINE", 377, 2, lerpRgb565(COLOR_BACKGROUND, COLOR_CYAN, eased));
+    drawCentered("DIGIPET", 338, 5, lerpRgb565(COLOR_BACKGROUND, COLOR_TEXT, eased));
+    drawCentered("LIFE SIGNAL ONLINE", 404, 2, lerpRgb565(COLOR_BACKGROUND, COLOR_CYAN, eased));
 
     display = previousDisplay;
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
@@ -1248,55 +1245,55 @@ void bootAnimationFallback() {
   constexpr uint32_t BOOT_DURATION_MS = 5000;
   panel->setBrightness(180);
   display->fillScreen(COLOR_BACKGROUND);
-  drawCentered("DIGIPET", 23, 3, COLOR_TEXT);
-  drawCentered("GENETIC LIFE INTERFACE", 57, 1, COLOR_CYAN);
-  display->drawRoundRect(24, 88, 320, 260, 30, COLOR_CARD);
-  display->drawRoundRect(31, 95, 306, 246, 25, COLOR_PURPLE);
+  drawCentered("DIGIPET", 25, 3, COLOR_TEXT);
+  drawCentered("GENETIC LIFE INTERFACE", 61, 1, COLOR_CYAN);
+  display->drawRoundRect(31, 94, 418, 279, 30, COLOR_CARD);
+  display->drawRoundRect(40, 102, 400, 263, 25, COLOR_PURPLE);
   playBootClipAsync();
 
   for (uint8_t frame = 0; millis() - animationStarted < BOOT_DURATION_MS; ++frame) {
     const uint32_t elapsed = millis() - animationStarted;
     const float progress = min(1.0f, elapsed / static_cast<float>(BOOT_DURATION_MS));
-    display->fillRoundRect(38, 102, 292, 232, 20, COLOR_BACKGROUND);
+    display->fillRoundRect(50, 109, 380, 249, 20, COLOR_BACKGROUND);
 
-    const int16_t coreY = 210;
+    const int16_t coreY = 225;
     const int16_t orbit = 58 - static_cast<int16_t>(progress * 18);
     for (uint8_t node = 0; node < 10; ++node) {
       const float phase = frame * 0.13f + node * 0.6283f;
-      const int16_t y = 126 + node * 19;
+      const int16_t y = 135 + node * 20;
       const int16_t offset = lroundf(sinf(phase) * orbit);
       const uint16_t nearColor = cosf(phase) > 0 ? COLOR_MINT : COLOR_PURPLE;
-      display->drawLine(184 - offset, y, 184 + offset, y, COLOR_CARD);
-      display->fillCircle(184 - offset, y, 5, nearColor);
-      display->fillCircle(184 + offset, y, 5, COLOR_CYAN);
+      display->drawLine(BOOT_CX - offset, y, BOOT_CX + offset, y, COLOR_CARD);
+      display->fillCircle(BOOT_CX - offset, y, 5, nearColor);
+      display->fillCircle(BOOT_CX + offset, y, 5, COLOR_CYAN);
     }
 
     const int16_t ringRadius = 30 + static_cast<int16_t>(progress * 70);
-    display->drawCircle(184, coreY, ringRadius, COLOR_CYAN);
-    display->drawCircle(184, coreY, max<int16_t>(8, ringRadius - 7), COLOR_CARD);
-    display->fillCircle(184, coreY, 12 + lroundf(sinf(frame * 0.22f) * 3), COLOR_MINT);
+    display->drawCircle(BOOT_CX, coreY, ringRadius, COLOR_CYAN);
+    display->drawCircle(BOOT_CX, coreY, max<int16_t>(8, ringRadius - 7), COLOR_CARD);
+    display->fillCircle(BOOT_CX, coreY, 12 + lroundf(sinf(frame * 0.22f) * 3), COLOR_MINT);
 
-    const uint16_t progressWidth = static_cast<uint16_t>(286 * progress);
-    display->fillRoundRect(41, 315, 286, 7, 3, COLOR_CARD);
-    if (progressWidth) display->fillRoundRect(41, 315, progressWidth, 7, 3, COLOR_CYAN);
+    const uint16_t progressWidth = static_cast<uint16_t>(374 * progress);
+    display->fillRoundRect(53, 338, 374, 7, 3, COLOR_CARD);
+    if (progressWidth) display->fillRoundRect(53, 338, progressWidth, 7, 3, COLOR_CYAN);
     const char *phaseText = progress < 0.28f ? "READING GENOME" :
                             progress < 0.62f ? "ASSEMBLING FORM" :
                             progress < 0.90f ? "STABILISING SIGNAL" :
                                                "LINK READY";
-    display->fillRect(80, 361, 208, 18, COLOR_BACKGROUND);
-    drawCentered(phaseText, 364, 1, progress > 0.89f ? COLOR_MINT : COLOR_MUTED);
+    display->fillRect(104, 387, 272, 19, COLOR_BACKGROUND);
+    drawCentered(phaseText, 390, 1, progress > 0.89f ? COLOR_MINT : COLOR_MUTED);
     delay(35);
   }
 
   display->fillScreen(COLOR_BACKGROUND);
-  display->fillCircle(184, 202, 88, COLOR_CARD);
-  display->drawCircle(184, 202, 91, COLOR_CYAN);
-  display->drawCircle(184, 202, 101, COLOR_PURPLE);
-  display->fillCircle(184, 202, 54, COLOR_MINT);
-  display->fillCircle(184, 202, 38, COLOR_BACKGROUND);
-  display->fillCircle(184, 202, 15, COLOR_TEXT);
-  drawCentered("DIGIPET", 315, 5, COLOR_TEXT);
-  drawCentered("LIFE SIGNAL ONLINE", 377, 2, COLOR_CYAN);
+  display->fillCircle(BOOT_CX, 216, 88, COLOR_CARD);
+  display->drawCircle(BOOT_CX, 216, 91, COLOR_CYAN);
+  display->drawCircle(BOOT_CX, 216, 101, COLOR_PURPLE);
+  display->fillCircle(BOOT_CX, 216, 54, COLOR_MINT);
+  display->fillCircle(BOOT_CX, 216, 38, COLOR_BACKGROUND);
+  display->fillCircle(BOOT_CX, 216, 15, COLOR_TEXT);
+  drawCentered("DIGIPET", 338, 5, COLOR_TEXT);
+  drawCentered("LIFE SIGNAL ONLINE", 404, 2, COLOR_CYAN);
   // The boot clip started above already covers this outro.
 }
 
@@ -1325,10 +1322,10 @@ void bootAnimation() {
     Arduino_GFX *previousDisplay = display;
     if (transitionsReady) display = &pageCanvasA;
     display->fillScreen(COLOR_BACKGROUND);
-    drawCentered("DIGIPET // BOOT", 28, 2, COLOR_MINT);
+    drawCentered("DIGIPET // BOOT", 30, 2, COLOR_MINT);
     const uint8_t mascotFrame = (elapsed / MASCOT_FRAME_MS) % BOOT_MASCOT_FRAME_COUNT;
     display->draw16bitRGBBitmap(
-        0, BOOT_MASCOT_Y,
+        BOOT_MASCOT_X, BOOT_MASCOT_Y,
         reinterpret_cast<const uint16_t *>(BOOT_MASCOT_FRAMES[mascotFrame]),
         BOOT_MASCOT_WIDTH, BOOT_MASCOT_HEIGHT);
     drawBootStatus(progress);
@@ -1348,30 +1345,17 @@ void bootAnimation() {
   Arduino_GFX *previousDisplay = display;
   if (transitionsReady) display = &pageCanvasA;
   display->fillScreen(COLOR_BACKGROUND);
-  drawCentered("DIGIPET // BOOT", 28, 2, COLOR_MINT);
+  drawCentered("DIGIPET // BOOT", 30, 2, COLOR_MINT);
   display->draw16bitRGBBitmap(
-      0, BOOT_MASCOT_Y,
+      BOOT_MASCOT_X, BOOT_MASCOT_Y,
       reinterpret_cast<const uint16_t *>(BOOT_MASCOT_FRAMES[0]),
       BOOT_MASCOT_WIDTH, BOOT_MASCOT_HEIGHT);
-  drawCentered("LIFE SIGNAL ONLINE", 398, 2, COLOR_CYAN);
+  drawCentered("LIFE SIGNAL ONLINE", 426, 2, COLOR_CYAN);
   if (transitionsReady) {
     display = previousDisplay;
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   }
   delay(450);
-}
-
-// The panel is bigger than the UI window, and the margins around the window
-// are never drawn to, so they would show whatever the panel RAM held at
-// power-on. Clears the whole 480x480 RAM once, bypassing the driver's
-// window offsets.
-void clearFullPanel() {
-  bus->beginWrite();
-  bus->writeC8D16D16(CO5300_W_CASET, 0, BOARD_LCD_WIDTH - 1);
-  bus->writeC8D16D16(CO5300_W_PASET, 0, BOARD_LCD_HEIGHT - 1);
-  bus->writeCommand(CO5300_W_RAMWR);
-  bus->writeRepeat(0x0000, static_cast<uint32_t>(BOARD_LCD_WIDTH) * BOARD_LCD_HEIGHT);
-  bus->endWrite();
 }
 
 bool i2cPresent(uint8_t address) {
@@ -1436,50 +1420,50 @@ void presentGenomeProfilePage() {
 
 void drawPlayerIdPage() {
   paintPageBackdrop();
-  drawCentered("PLAYER IDENTITY", 22, 3, COLOR_MINT);
-  drawCentered("SHA-256 // BOOT SESSION", 58, 1, COLOR_CYAN);
-  drawPanelGlow(20, 93, 328, 218, 24, COLOR_PURPLE);
-  display->fillRoundRect(20, 93, 328, 218, 24, COLOR_CARD);
-  display->drawRoundRect(27, 100, 314, 204, 19, COLOR_PURPLE);
+  drawCentered("PLAYER IDENTITY", 24, 3, COLOR_MINT);
+  drawCentered("SHA-256 // BOOT SESSION", 62, 1, COLOR_CYAN);
+  drawPanelGlow(26, 100, 428, 233, 24, COLOR_PURPLE);
+  display->fillRoundRect(26, 100, 428, 233, 24, COLOR_CARD);
+  display->drawRoundRect(35, 107, 410, 219, 19, COLOR_PURPLE);
   display->setTextSize(2);
   display->setTextColor(COLOR_TEXT);
   for (uint8_t row = 0; row < 4; ++row) {
     char segment[17]{};
     memcpy(segment, playerIdHex + row * 16, 16);
-    display->setCursor(88, 127 + row * 42);
+    display->setCursor(115, 127 + row * 42);
     display->print(segment);
   }
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(45, 330);
+  display->setCursor(59, 354);
   display->printf("UTC SOURCE: %llu", static_cast<unsigned long long>(playerIdTimestamp));
-  display->fillRoundRect(84, 375, 200, 48, 15, COLOR_CYAN);
-  drawCentered("BACK TO SETTINGS", 393, 2, readableTextColor(COLOR_CYAN));
+  display->fillRoundRect(110, 402, 260, 51, 15, COLOR_CYAN);
+  drawCentered("BACK TO SETTINGS", 421, 2, readableTextColor(COLOR_CYAN));
 }
 
 void drawUpdatePage(const char *status, int progress) {
   paintPageBackdrop();
-  drawCentered("SIGNED UPDATE", 30, 3, COLOR_MINT);
-  drawCentered("DIGIPET OTA // ECDSA P-256", 68, 1, COLOR_CYAN);
-  drawPanelGlow(24, 110, 320, 208, 26, COLOR_PURPLE);
-  display->fillRoundRect(24, 110, 320, 208, 26, COLOR_CARD);
-  display->drawRoundRect(32, 118, 304, 192, 20, COLOR_PURPLE);
-  display->drawCircle(184, 184, 43, COLOR_CYAN);
-  display->drawCircle(184, 184, 29, COLOR_MINT);
-  display->fillCircle(184, 184, 10, progress >= 0 ? COLOR_MINT : COLOR_WARNING);
-  drawCentered(status, 249, 1, COLOR_TEXT);
+  drawCentered("SIGNED UPDATE", 32, 3, COLOR_MINT);
+  drawCentered("DIGIPET OTA // ECDSA P-256", 73, 1, COLOR_CYAN);
+  drawPanelGlow(31, 118, 418, 223, 26, COLOR_PURPLE);
+  display->fillRoundRect(31, 118, 418, 223, 26, COLOR_CARD);
+  display->drawRoundRect(42, 126, 396, 206, 20, COLOR_PURPLE);
+  display->drawCircle(240, 197, 43, COLOR_CYAN);
+  display->drawCircle(240, 197, 29, COLOR_MINT);
+  display->fillCircle(240, 197, 10, progress >= 0 ? COLOR_MINT : COLOR_WARNING);
+  drawCentered(status, 267, 1, COLOR_TEXT);
   if (progress >= 0) {
-    display->drawRoundRect(52, 280, 264, 17, 7, COLOR_MUTED);
-    if (progress) display->fillRoundRect(55, 283, 258 * progress / 100, 11, 5, COLOR_MINT);
+    display->drawRoundRect(68, 300, 344, 18, 7, COLOR_MUTED);
+    if (progress) display->fillRoundRect(72, 303, 336 * progress / 100, 12, 5, COLOR_MINT);
     char percent[8];
     snprintf(percent, sizeof(percent), "%d%%", progress);
-    drawCentered(percent, 332, 2, COLOR_CYAN);
+    drawCentered(percent, 356, 2, COLOR_CYAN);
   } else {
-    drawCentered("TAP TO RETURN", 343, 2, COLOR_CYAN);
+    drawCentered("TAP TO RETURN", 368, 2, COLOR_CYAN);
   }
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(125, 410);
+  display->setCursor(163, 439);
   display->printf("INSTALLED v%s", DIGIPET_VERSION);
 }
 
@@ -1642,7 +1626,7 @@ void serviceSerialDebug() {
     Arduino_GFX *previousDisplay = display;
     display = &pageCanvasB;
     paintPageBackdrop();
-    drawCentered("LINK BATTLE", 16, 3, COLOR_MINT);
+    drawCentered("LINK BATTLE", 17, 3, COLOR_MINT);
     PetGenome other = pet.genome;
     other.lineage = (other.lineage + 3) % 10;
     other.bodyType = (other.bodyType + 2) % 5;
@@ -2009,20 +1993,19 @@ void updateClockDisplay() {
     // is invisible against the real backdrop instead of leaving a
     // faintly-wrong-shade rectangle behind it every second.
     for (int16_t row = 42; row < 64; ++row) {
-      display->drawFastHLine(284, row, 68, backdropColorAt(row));
+      display->drawFastHLine(370, row, 89, backdropColorAt(row));
     }
     display->setTextSize(2);
     display->setTextColor(clockValid ? COLOR_TEXT : COLOR_MUTED);
-    display->setCursor(288, 45);
+    display->setCursor(376, 48);
     display->print(clockText);
   }
 }
 
 void changeSetting(int16_t x, int16_t y) {
-  if (y < 78 || y >= 364) return;
-  const uint8_t column = x >= UI_WIDTH / 2;
-  const uint8_t row = y >= 227;
-  const uint8_t item = settingsGridPage * 4 + row * 2 + column;
+  const int8_t tile = uiTileAt(x, y);
+  if (tile < 0) return;
+  const uint8_t item = settingsGridPage * 4 + tile;
 
   // item == 3 (Wake Mode) is a locked placeholder now -- see
   // drawSettingsTile()'s own call site for why -- so it's deliberately
@@ -2057,17 +2040,25 @@ void changeSetting(int16_t x, int16_t y) {
 }
 
 void handleSettingsControlTap(int16_t x, int16_t y) {
-  if (y >= 375) {
+  if (y >= UI_BACK_HIT_Y) {
     transitionSettingsView(SETTINGS_HOME, false);
     return;
   }
 
+  // Index of the choice row a y falls on, or -1 between rows / past the end.
+  auto choiceAt = [y](int16_t y0, int16_t pitch, uint8_t count) -> int {
+    if (y < y0) return -1;
+    const int value = (y - y0) / pitch;
+    return ((y - y0) % pitch < SETTINGS_CHOICE_H && value < count) ? value : -1;
+  };
+
   bool changed = false;
-  if (settingsView == SETTINGS_BRIGHTNESS && y >= 83 && y < 355) {
-    const int column = (x - 22) / 113;
-    const int row = (y - 83) / 68;
-    if (x >= 22 && column >= 0 && column < 3 && row >= 0 && row < 4 &&
-        (x - 22) % 113 < 98 && (y - 83) % 68 < 53) {
+  if (settingsView == SETTINGS_BRIGHTNESS && y >= SETTINGS_BRIGHT_Y0) {
+    const int column = (x - SETTINGS_BRIGHT_X0) / SETTINGS_BRIGHT_PITCH_X;
+    const int row = (y - SETTINGS_BRIGHT_Y0) / SETTINGS_BRIGHT_PITCH_Y;
+    if (x >= SETTINGS_BRIGHT_X0 && column < 3 && row < 4 &&
+        (x - SETTINGS_BRIGHT_X0) % SETTINGS_BRIGHT_PITCH_X < SETTINGS_BRIGHT_W &&
+        (y - SETTINGS_BRIGHT_Y0) % SETTINGS_BRIGHT_PITCH_Y < SETTINGS_BRIGHT_H) {
       const int value = row * 3 + column;
       if (value <= 10) {
         settings.brightnessIndex = value;
@@ -2075,16 +2066,15 @@ void handleSettingsControlTap(int16_t x, int16_t y) {
         changed = true;
       }
     }
-  } else if (settingsView == SETTINGS_IDLE && y >= 89 && y < 337) {
-    const uint8_t value = (y - 89) / 62;
-    if ((y - 89) % 62 < 48 && value < 4) {
+  } else if (settingsView == SETTINGS_IDLE) {
+    const int value = choiceAt(SETTINGS_IDLE_Y0, SETTINGS_IDLE_PITCH, 4);
+    if (value >= 0) {
       settings.sleepIndex = value;
       changed = true;
     }
-  } else if ((settingsView == SETTINGS_VOLUME || settingsView == SETTINGS_THEME) &&
-             y >= 78 && y < 363) {
-    const uint8_t value = (y - 78) / 57;
-    if ((y - 78) % 57 < 48 && value < 5) {
+  } else if (settingsView == SETTINGS_VOLUME || settingsView == SETTINGS_THEME) {
+    const int value = choiceAt(SETTINGS_LIST_Y0, SETTINGS_LIST_PITCH, 5);
+    if (value >= 0) {
       if (settingsView == SETTINGS_VOLUME) {
         settings.volumeIndex = value;
         settings.soundEnabled = value > 0;
@@ -2097,8 +2087,14 @@ void handleSettingsControlTap(int16_t x, int16_t y) {
       changed = true;
     }
   } else if (settingsView == SETTINGS_BOOT) {
-    if (y >= 130 && y < 178) { settings.bootAnimationEnabled = true; changed = true; }
-    if (y >= 199 && y < 247) { settings.bootAnimationEnabled = false; changed = true; }
+    if (y >= SETTINGS_BOOT_ON_Y && y < SETTINGS_BOOT_ON_Y + SETTINGS_CHOICE_H) {
+      settings.bootAnimationEnabled = true;
+      changed = true;
+    }
+    if (y >= SETTINGS_BOOT_OFF_Y && y < SETTINGS_BOOT_OFF_Y + SETTINGS_CHOICE_H) {
+      settings.bootAnimationEnabled = false;
+      changed = true;
+    }
   }
 
   if (changed) {
@@ -2111,10 +2107,10 @@ void drawSleep() {
   display->fillScreen(RGB565_BLACK);
   display->setTextColor(COLOR_CYAN);
   display->setTextSize(2);
-  display->setCursor(animationFrame ? 170 : 174, 226);
+  display->setCursor(UI_CENTER_X + (animationFrame ? -14 : -10), 242);
   display->print("z");
   display->setTextSize(3);
-  display->setCursor(animationFrame ? 193 : 197, 196);
+  display->setCursor(UI_CENTER_X + (animationFrame ? 9 : 13), 210);
   display->print("Z");
 }
 
@@ -2278,7 +2274,6 @@ void setup() {
   // Same orientation the 2.16" demo sets; the touch swap/mirror flags in
   // the board header assume it.
   bus->writeC8D8(BOARD_LCD_MADCTL_REG, BOARD_LCD_MADCTL_VALUE);
-  clearFullPanel();
 
   // Stand up the PSRAM framebuffers before the boot animation so it can use
   // the same double-buffered blit path as the rest of the UI's transitions.
@@ -2305,7 +2300,7 @@ void setup() {
   } else {
     panel->setBrightness(brightnessLevel());
     display->fillScreen(COLOR_BACKGROUND);
-    drawCentered("DIGIPET", 196, 4, COLOR_MINT);
+    drawCentered("DIGIPET", 210, 4, COLOR_MINT);
     delay(350);
   }
 
@@ -2542,28 +2537,21 @@ void loop() {
       // handleBattleGridTap()'s/handleBattleTap()'s own hit-test bounds
       // exactly, so a highlight always appears whenever that tap will
       // actually fire the action on release.
-      if (currentPage == PAGE_STATUS && statusShowingActions && y >= 78 && y < 364) {
-        constexpr int16_t kTileX[] = {18, 190};
-        constexpr int16_t kTileY[] = {78, 227};
-        const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
-        const uint8_t row = y < 227 ? 0 : 1;
-        flashPressedHighlight(kTileX[col], kTileY[row], 160, 137, 20);
+      const int8_t tile = uiTileAt(x, y);
+      const int8_t move = battleMoveAt(x, y);
+      if (currentPage == PAGE_STATUS && statusShowingActions && tile >= 0) {
+        flashPressedHighlight(UI_TILE_X[tile % 2], UI_TILE_Y[tile / 2], UI_TILE_W,
+                              UI_TILE_H, UI_TILE_RADIUS);
       } else if (currentPage == PAGE_BATTLE &&
                  battle.state() == FamiliarBattleState::Idle &&
-                 battleShowingActions && y >= 78 && y < 364) {
-        constexpr int16_t kTileX[] = {18, 190};
-        constexpr int16_t kTileY[] = {78, 227};
-        const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
-        const uint8_t row = y < 227 ? 0 : 1;
-        flashPressedHighlight(kTileX[col], kTileY[row], 160, 137, 20);
+                 battleShowingActions && tile >= 0) {
+        flashPressedHighlight(UI_TILE_X[tile % 2], UI_TILE_Y[tile / 2], UI_TILE_W,
+                              UI_TILE_H, UI_TILE_RADIUS);
       } else if (currentPage == PAGE_BATTLE &&
                  battle.state() == FamiliarBattleState::Battling &&
-                 !battle.myMoveSubmitted() && y >= 276 && y <= 382) {
-        constexpr int16_t kColX[] = {24, 194};
-        constexpr int16_t kRowY[] = {280, 336};
-        const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
-        const uint8_t row = y < 329 ? 0 : 1;
-        flashPressedHighlight(kColX[col], kRowY[row], 150, 50, 14);
+                 !battle.myMoveSubmitted() && move >= 0) {
+        flashPressedHighlight(BATTLE_BTN_X[move % 2], BATTLE_MOVE_Y[move / 2],
+                              BATTLE_BTN_W, BATTLE_MOVE_H, BATTLE_BTN_RADIUS);
       }
     } else {
       touchLastX = x;
@@ -2591,8 +2579,8 @@ void loop() {
       }
       if (currentPage == PAGE_COMPANION && touchDuration >= 900 &&
           abs(deltaX) < 30 && abs(deltaY) < 30 &&
-          touchStartX >= 105 && touchStartX <= 263 &&
-          touchStartY >= 125 && touchStartY <= 305) {
+          touchStartX >= COMPANION_DEBUG_HIT_X0 && touchStartX <= COMPANION_DEBUG_HIT_X1 &&
+          touchStartY >= COMPANION_DEBUG_HIT_Y0 && touchStartY <= COMPANION_DEBUG_HIT_Y1) {
         showingEvolutionDebug = true;
         playTone(262, 80, 35);
         presentOverlayEntrance(PAGE_COMPANION, drawEvolutionDebugPage);

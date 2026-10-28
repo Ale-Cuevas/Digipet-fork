@@ -470,18 +470,18 @@ bool importCopiedGenome() {
 
 void drawScanningPage(uint8_t phase) {
   paintPageBackdrop();
-  drawCentered("SIGNAL SCAN", 40, 3, COLOR_MINT);
-  drawCentered("PASSIVE WIFI + BLE SWEEP", 76, 1, COLOR_CYAN);
-  drawPanelGlow(24, 120, 320, 190, 26, COLOR_PURPLE);
-  display->fillRoundRect(24, 120, 320, 190, 26, COLOR_CARD);
-  display->drawRoundRect(32, 128, 304, 174, 20, COLOR_PURPLE);
-  drawCentered(phase == 0 ? "WIFI SWEEP" : "BLE SWEEP", 175, 2, COLOR_TEXT);
+  drawCentered("SIGNAL SCAN", 43, 3, COLOR_MINT);
+  drawCentered("PASSIVE WIFI + BLE SWEEP", 81, 1, COLOR_CYAN);
+  drawPanelGlow(31, 129, 418, 203, 26, COLOR_PURPLE);
+  display->fillRoundRect(31, 129, 418, 203, 26, COLOR_CARD);
+  display->drawRoundRect(42, 137, 396, 187, 20, COLOR_PURPLE);
+  drawCentered(phase == 0 ? "WIFI SWEEP" : "BLE SWEEP", 188, 2, COLOR_TEXT);
   drawCentered(phase == 0 ? "READING BEACON FRAMES" : "READING ADVERTISEMENTS",
-               208, 1, COLOR_MUTED);
+               223, 1, COLOR_MUTED);
   for (uint8_t i = 0; i < 2; ++i) {
-    display->fillCircle(160 + i * 48, 260, 10, i <= phase ? COLOR_MINT : COLOR_MUTED);
+    display->fillCircle(160 + i * 48, 279, 10, i <= phase ? COLOR_MINT : COLOR_MUTED);
   }
-  drawCentered("HOLD STILL...", 340, 1, COLOR_WARNING);
+  drawCentered("HOLD STILL...", 364, 1, COLOR_WARNING);
 }
 
 // Blits drawScanningPage() straight to the panel (through the transition
@@ -580,7 +580,7 @@ void playEvolutionAnimation() {
     memcpy(pageCanvasA.getFramebuffer(), pageCanvasB.getFramebuffer(), frameBytes);
     drawBootParticles(palette, frame, pet.genome.seed);
     drawBootCore(palette, frame, 0.6f + progress * 0.4f);
-    drawCentered("DATA EVOLUTION", 60, 3,
+    drawCentered("DATA EVOLUTION", 64, 3,
                 lerpRgb565(COLOR_BACKGROUND, COLOR_TEXT, bootSmoothstep(0.0f, 0.3f, progress)));
     display = previousDisplay;
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
@@ -599,11 +599,11 @@ void playEvolutionAnimation() {
     display = &pageCanvasA;
     memcpy(pageCanvasA.getFramebuffer(), pageCanvasB.getFramebuffer(), frameBytes);
     drawBootParticles(palette, kBurstMs / 18 + frame, pet.genome.seed);
-    drawCentered("DATA EVOLUTION", 60, 3, COLOR_TEXT);
+    drawCentered("DATA EVOLUTION", 64, 3, COLOR_TEXT);
     drawCreaturePortrait(pet.genome, pet.stage, BOOT_CX, BOOT_CORE_Y,
                         lroundf(40 + eased * 62),
                         lerpRgb565(COLOR_BACKGROUND, palette.glow, eased));
-    drawCentered(STAGE_NAMES[pet.stage], 330, 3,
+    drawCentered(STAGE_NAMES[pet.stage], 354, 3,
                 lerpRgb565(COLOR_BACKGROUND, COLOR_MINT, eased));
     display = previousDisplay;
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
@@ -628,25 +628,25 @@ void checkEvolution() {
 // gameOverlayTouch()'s own dispatch below).
 void drawEvolutionDebugPage() {
   paintPageBackdrop();
-  drawCentered("EVOLUTION DEBUG", 24, 3, COLOR_WARNING);
-  drawCentered("DEVELOPMENT CONTROL", 61, 1, COLOR_MUTED);
-  drawPanelGlow(24, 96, 320, 174, 24, COLOR_PURPLE);
-  display->fillRoundRect(24, 96, 320, 174, 24, COLOR_CARD);
-  display->drawRoundRect(31, 103, 306, 160, 19, COLOR_PURPLE);
-  drawCentered("CURRENT FORM", 122, 1, COLOR_CYAN);
-  drawCentered(STAGE_NAMES[pet.stage], 148, 3, COLOR_TEXT);
-  drawCentered(pet.stage < 4 ? "NEXT EXPRESSION" : "FINAL EXPRESSION", 198, 1,
+  drawCentered("EVOLUTION DEBUG", 26, 3, COLOR_WARNING);
+  drawCentered("DEVELOPMENT CONTROL", 65, 1, COLOR_MUTED);
+  drawPanelGlow(31, 103, 418, 186, 24, COLOR_PURPLE);
+  display->fillRoundRect(31, 103, 418, 186, 24, COLOR_CARD);
+  display->drawRoundRect(40, 110, 400, 172, 19, COLOR_PURPLE);
+  drawCentered("CURRENT FORM", 131, 1, COLOR_CYAN);
+  drawCentered(STAGE_NAMES[pet.stage], 159, 3, COLOR_TEXT);
+  drawCentered(pet.stage < 4 ? "NEXT EXPRESSION" : "FINAL EXPRESSION", 212, 1,
                COLOR_CYAN);
   drawCentered(pet.stage < 4 ? STAGE_NAMES[pet.stage + 1] : "MAXIMUM STAGE",
-               222, 2, pet.stage < 4 ? COLOR_MINT : COLOR_WARNING);
+               238, 2, pet.stage < 4 ? COLOR_MINT : COLOR_WARNING);
 
   const uint16_t advanceFill = pet.stage < 4 ? COLOR_DANGER : COLOR_MUTED;
-  display->fillRoundRect(48, 296, 272, 58, 16, advanceFill);
-  drawCentered(pet.stage < 4 ? "ADVANCE STAGE" : "MAX STAGE", 316, 2,
+  display->fillRoundRect(63, EVO_DEBUG_ADVANCE_Y, 354, EVO_DEBUG_ADVANCE_H, 16, advanceFill);
+  drawCentered(pet.stage < 4 ? "ADVANCE STAGE" : "MAX STAGE", 339, 2,
                readableTextColor(advanceFill));
-  display->fillRoundRect(92, 375, 184, 47, 14, COLOR_CARD);
-  display->drawRoundRect(92, 375, 184, 47, 14, COLOR_CYAN);
-  drawCentered("CANCEL", 391, 2, COLOR_TEXT);
+  display->fillRoundRect(120, EVO_DEBUG_CANCEL_Y, 240, 50, 14, COLOR_CARD);
+  display->drawRoundRect(120, EVO_DEBUG_CANCEL_Y, 240, 50, 14, COLOR_CYAN);
+  drawCentered("CANCEL", 419, 2, COLOR_TEXT);
 }
 
 void debugAdvanceEvolution() {
@@ -729,13 +729,13 @@ void agePet() {
 void updateCreatureAnimation() {
   if (sleeping) {
     // Keep idle visually quiet: only the two dream marks move.
-    display->fillRect(158, 184, 72, 72, RGB565_BLACK);
+    display->fillRect(UI_CENTER_X - 26, 197, 72, 77, RGB565_BLACK);
     display->setTextColor(COLOR_CYAN);
     display->setTextSize(2);
-    display->setCursor(animationFrame ? 170 : 174, 226);
+    display->setCursor(UI_CENTER_X + (animationFrame ? -14 : -10), 242);
     display->print("z");
     display->setTextSize(3);
-    display->setCursor(animationFrame ? 193 : 197, 196);
+    display->setCursor(UI_CENTER_X + (animationFrame ? 9 : 13), 210);
     display->print("Z");
   } else if (currentPage == PAGE_COMPANION) {
     // Compose the entire frame in PSRAM. Directly streaming overlapping
@@ -906,7 +906,7 @@ void drawBattlePage() {
   }
 
   paintPageBackdrop();
-  drawCentered("PVP", 16, 3, COLOR_MINT);
+  drawCentered("PVP", 17, 3, COLOR_MINT);
 
   const FamiliarBattleState state = battle.state();
   // Idle now draws one of its own two full-screen sub-views (see
@@ -920,7 +920,7 @@ void drawBattlePage() {
   if (showsCompactHeader) {
     display->setTextSize(1);
     display->setTextColor(COLOR_CYAN);
-    display->setCursor(24, 51);
+    display->setCursor(31, 55);
     // Item bonuses (pet.bonusHp/Attack/Defense) fold in here for display --
     // see useItem()'s own comment on why they don't (yet) travel over BLE
     // into what a real opponent's device computes for these same numbers.
@@ -929,7 +929,7 @@ void drawBattlePage() {
                     FamiliarBattleService::deriveAttack(5, pet.stage) + pet.bonusAttack,
                     FamiliarBattleService::deriveDefense(5, pet.stage) + pet.bonusDefense);
     display->setTextColor(COLOR_MUTED);
-    display->setCursor(24, 64);
+    display->setCursor(31, 69);
     display->printf("RECORD %luW-%luL", (unsigned long)battleStats.wins,
                     (unsigned long)battleStats.losses);
   }
@@ -946,26 +946,26 @@ void drawBattlePage() {
     // dedicated screen drawn in handleBattleTap instead) but handled here
     // too rather than silently falling through to the battling layout.
     const PetPalette palette = paletteForGenome(pet.genome);
-    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 184, 70, palette.glow);
-    display->drawCircle(184, 184, 82, COLOR_CYAN);
-    drawCentered("SCANNING", 288, 2, COLOR_TEXT);
-    drawCentered(battle.status().c_str(), 320, 1, COLOR_MUTED);
+    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 240, 197, 70, palette.glow);
+    display->drawCircle(240, 197, 82, COLOR_CYAN);
+    drawCentered("SCANNING", 309, 2, COLOR_TEXT);
+    drawCentered(battle.status().c_str(), 343, 1, COLOR_MUTED);
   } else if (state == FamiliarBattleState::Hosting ||
              state == FamiliarBattleState::Connecting) {
     const PetPalette palette = paletteForGenome(pet.genome);
-    display->drawCircle(184, 184, 72, palette.glow);
-    display->drawCircle(184, 184, 51, palette.secondary);
-    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 184, 60, palette.glow);
+    display->drawCircle(240, 197, 72, palette.glow);
+    display->drawCircle(240, 197, 51, palette.secondary);
+    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 240, 197, 60, palette.glow);
     drawCentered(state == FamiliarBattleState::Hosting ? "SIGNAL OPEN" : "HANDSHAKE",
-                 278, 2, COLOR_TEXT);
-    drawCentered(battle.status().c_str(), 310, 1, COLOR_MUTED);
-    drawCentered("TAP BELOW TO CANCEL", 367, 1, COLOR_WARNING);
+                 298, 2, COLOR_TEXT);
+    drawCentered(battle.status().c_str(), 332, 1, COLOR_MUTED);
+    drawCentered("TAP BELOW TO CANCEL", 393, 1, COLOR_WARNING);
   } else if (state == FamiliarBattleState::Exchanged) {
     const PetPalette palette = paletteForGenome(pet.genome);
-    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 170, 70, palette.glow);
-    drawCentered("FRIEND ADDED", 260, 2, COLOR_MINT);
-    drawCentered(battle.status().c_str(), 296, 1, COLOR_MUTED);
-    drawCentered("TAP TO RETURN", 340, 1, COLOR_CYAN);
+    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 240, 182, 70, palette.glow);
+    drawCentered("FRIEND ADDED", 279, 2, COLOR_MINT);
+    drawCentered(battle.status().c_str(), 317, 1, COLOR_MUTED);
+    drawCentered("TAP TO RETURN", 364, 1, COLOR_CYAN);
   } else {
     // The two most recent log lines ("you did this, they did that") rather
     // than one line under a big decorative VS panel.
@@ -997,11 +997,12 @@ void handleBattleTap(int16_t x, int16_t y) {
   if (showingBattleResults) {
     const auto &results = battle.scanResults();
     const uint8_t start = battleResultsPage * kBattleResultsPerPage;
-    if (y >= 66 && y < 66 + kBattleResultsPerPage * 76) {
-      const uint8_t row = (y - 66) / 76;
+    if (y >= BATTLE_PICKER_Y0 &&
+        y < BATTLE_PICKER_Y0 + kBattleResultsPerPage * BATTLE_PICKER_PITCH) {
+      const uint8_t row = (y - BATTLE_PICKER_Y0) / BATTLE_PICKER_PITCH;
       const size_t index = start + row;
-      // Rows are 68 tall inside each 76 slot -- a tap in the 8px gap still
-      // resolves to the nearest row, which is fine here.
+      // A tap in the small gap under a row still resolves to that row,
+      // which is fine here.
       if (index < results.size()) {
         showingBattleResults = false;
         playTone(659, 60, 40);
@@ -1012,10 +1013,10 @@ void handleBattleTap(int16_t x, int16_t y) {
         if (transitionsReady) display = &pageCanvasA;
         paintPageBackdrop();
         const PetPalette palette = paletteForGenome(pet.genome);
-        drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 170, 70,
+        drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 240, 182, 70,
                              palette.glow);
-        drawCentered("CONNECTING...", 260, 2, COLOR_CYAN);
-        drawCentered("ESTABLISHING LINK", 296, 1, COLOR_MUTED);
+        drawCentered("CONNECTING...", 279, 2, COLOR_CYAN);
+        drawCentered("ESTABLISHING LINK", 317, 1, COLOR_MUTED);
         if (transitionsReady) {
           display = previousDisplay;
           panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
@@ -1023,22 +1024,19 @@ void handleBattleTap(int16_t x, int16_t y) {
         battle.connectTo(index);
         presentBattlePage();
       }
-    } else if (y >= 385 && y <= 428) {
+    } else if (y >= UI_BACK_HIT_Y) {
       showingBattleResults = false;
       playTone(392, 60, 35);
       presentBattlePage();
     }
     return;
   }
-  if (state == FamiliarBattleState::Battling && y >= 276 && y <= 382 &&
+  if (state == FamiliarBattleState::Battling && battleMoveAt(x, y) >= 0 &&
       !battle.myMoveSubmitted()) {
-    // Matches the 2x2 grid in drawBattlingLayout: columns split at the
-    // midpoint, rows split at the gap between the two button rows. Row
-    // index doubled gives [ATK,DEF]/[SPEC,FLEE] = FamiliarBattleMove's own
+    // Matches the 2x2 grid in drawBattlingLayout (battleMoveAt(),
+    // ui_layout.h). [ATK,DEF]/[SPEC,FLEE] is FamiliarBattleMove's own
     // Attack=0/Defend=1/Special=2/Flee=3 ordering directly.
-    const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
-    const uint8_t row = y < 329 ? 0 : 1;
-    const uint8_t move = row * 2 + col;
+    const uint8_t move = battleMoveAt(x, y);
     if (move == static_cast<uint8_t>(FamiliarBattleMove::Flee)) {
       if (fleeArmed && millis() < fleeArmedUntil) {
         fleeArmed = false;
@@ -1060,7 +1058,8 @@ void handleBattleTap(int16_t x, int16_t y) {
       presentBattlePage();
     }
   } else if (state == FamiliarBattleState::Result) {
-    if (battle.opponentGenomeCodeAvailable() && y >= 292 && x < UI_WIDTH / 2) {
+    if (battle.opponentGenomeCodeAvailable() && y >= BATTLE_RESULT_BTN_Y - 12 &&
+        x < UI_WIDTH / 2) {
       PetGenome received{};
       if (decodePetGenome(battle.opponentGenomeCode(), received)) {
         saveCopiedGenome(received);
@@ -1074,7 +1073,7 @@ void handleBattleTap(int16_t x, int16_t y) {
       presentBattlePage();
     }
   } else if ((state == FamiliarBattleState::Hosting ||
-              state == FamiliarBattleState::Connecting) && y >= 340) {
+              state == FamiliarBattleState::Connecting) && y >= 364) {
     battle.end();
     presentBattlePage();
   } else if (state == FamiliarBattleState::Exchanged) {
@@ -1088,10 +1087,9 @@ void handleBattleTap(int16_t x, int16_t y) {
 // battleShowingActions is true, same relationship handleStatusGridTap()
 // has with the Status action grid.
 void handleBattleGridTap(int16_t x, int16_t y) {
-  if (y < 78 || y >= 364) return;
-  const uint8_t column = x >= UI_WIDTH / 2;
-  const uint8_t row = y >= 227;
-  const auto tile = static_cast<BattleGridTile>(row * 2 + column);
+  const int8_t index = uiTileAt(x, y);
+  if (index < 0) return;
+  const auto tile = static_cast<BattleGridTile>(index);
   if (tile == GRID_RIVALS) {
     showingRivals = true;
     presentOverlayEntrance(PAGE_BATTLE, drawRivalsPage);
@@ -1123,9 +1121,9 @@ void handleBattleGridTap(int16_t x, int16_t y) {
     if (transitionsReady) display = &pageCanvasA;
     paintPageBackdrop();
     const PetPalette palette = paletteForGenome(pet.genome);
-    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 184, 170, 70, palette.glow);
-    drawCentered("SCANNING BATTLE LINKS", 260, 2, COLOR_CYAN);
-    drawCentered("4 SECOND SEARCH", 296, 1, COLOR_MUTED);
+    drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 240, 182, 70, palette.glow);
+    drawCentered("SCANNING BATTLE LINKS", 279, 2, COLOR_CYAN);
+    drawCentered("4 SECOND SEARCH", 317, 1, COLOR_MUTED);
     if (transitionsReady) {
       display = previousDisplay;
       panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
@@ -1173,14 +1171,15 @@ void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy) {
     }
     return;
   }
-  if (y >= 388) {
+  if (y >= FRIENDS_BACK_Y) {
     if (battle.state() != FamiliarBattleState::Idle) battle.end();
     friendDiscoverable = false;
     showingFriends = false;
     presentOverlayExit(drawFriendsPage, PAGE_BATTLE);
     return;
   }
-  if (friendsPage == 1 && y >= 270 && y < 334) {
+  if (friendsPage == 1 && y >= FRIENDS_DISCOVER_BTN_Y &&
+      y < FRIENDS_DISCOVER_BTN_Y + FRIENDS_DISCOVER_BTN_H) {
     const FamiliarBattleCapabilities capabilities = battleCapabilities();
     if (!friendDiscoverable) {
       battle.beginHost(battlePlayerId(), pet.stage, 5, capabilities, nullptr,
@@ -1194,15 +1193,16 @@ void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy) {
     presentFriendsPage();
     return;
   }
-  if (friendsPage == 2 && y >= 306 && y < 370) {
+  if (friendsPage == 2 && y >= FRIENDS_NEARBY_BTN_Y &&
+      y < FRIENDS_NEARBY_BTN_Y + FRIENDS_NEARBY_BTN_H) {
     const FamiliarBattleCapabilities capabilities = battleCapabilities();
     if (x < UI_WIDTH / 2) {
       friendDiscoverable = false;
       Arduino_GFX *previousDisplay = display;
       if (transitionsReady) display = &pageCanvasA;
       paintPageBackdrop();
-      drawCentered("SCANNING NEARBY", 190, 2, COLOR_CYAN);
-      drawCentered("DIGIPET SIGNATURES ONLY", 224, 1, COLOR_MUTED);
+      drawCentered("SCANNING NEARBY", 204, 2, COLOR_CYAN);
+      drawCentered("DIGIPET SIGNATURES ONLY", 240, 1, COLOR_MUTED);
       if (transitionsReady) {
         display = previousDisplay;
         panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
@@ -1239,18 +1239,18 @@ void presentItemsPage() {
 }
 
 // The Items overlay's row taps (see drawItemsPage()'s own prototype
-// comment for why this uses an explicit BACK button, y >= 375 here,
+// comment for why this uses an explicit BACK button here,
 // instead of Rivals/Recon Log/Friends' tap-anywhere dismissal) and its
 // per-item hit-test rows, keyed off that function's exact kFirstRowY/
 // kRowHeight geometry.
 void handleItemsTap(int16_t x, int16_t y) {
-  if (y >= 375) {
+  if (y >= UI_BACK_HIT_Y) {
     showingItems = false;
     presentOverlayExit(drawItemsPage, PAGE_STATUS);
     return;
   }
-  constexpr int16_t kFirstRowY = 76;
-  constexpr int16_t kRowHeight = 52;
+  constexpr int16_t kFirstRowY = ITEMS_ROW_Y0;
+  constexpr int16_t kRowHeight = ITEMS_ROW_PITCH;
   if (y < kFirstRowY) return;
   const uint8_t row = (y - kFirstRowY) / kRowHeight;
   if (row >= kItemTypeCount) return;
@@ -1265,10 +1265,9 @@ void handleItemsTap(int16_t x, int16_t y) {
 // ui_pages.h) instead of Settings' home grid -- one page's worth of tiles
 // here, not two, so no settingsGridPage-style page offset is needed.
 void handleStatusGridTap(int16_t x, int16_t y) {
-  if (y < 78 || y >= 364) return;
-  const uint8_t column = x >= UI_WIDTH / 2;
-  const uint8_t row = y >= 227;
-  const uint8_t tile = statusActionsPage * 4 + row * 2 + column;
+  const int8_t index = uiTileAt(x, y);
+  if (index < 0) return;
+  const uint8_t tile = statusActionsPage * 4 + index;
   if (tile == 3) {
     showingReconLog = true;
     presentOverlayEntrance(PAGE_STATUS, drawReconLogPage);
@@ -1317,7 +1316,8 @@ void gameHandleTap(Page page, int16_t x, int16_t y, int16_t dx, int16_t dy,
                    uint32_t touchDuration) {
   if (page == PAGE_COMPANION && touchDuration < 900 &&
       abs(dx) < 30 && abs(dy) < 30 &&
-      x >= 55 && x <= 313 && y >= 90 && y <= 358) {
+      x >= COMPANION_PROFILE_HIT_X0 && x <= COMPANION_PROFILE_HIT_X1 &&
+      y >= COMPANION_PROFILE_HIT_Y0 && y <= COMPANION_PROFILE_HIT_Y1) {
     genomeProfileReturnPage = PAGE_COMPANION;
     showingGenomeProfile = true;
     // Always opens on the identity sub-view -- see transitionStatusView()'s
@@ -1327,8 +1327,8 @@ void gameHandleTap(Page page, int16_t x, int16_t y, int16_t dx, int16_t dy,
     presentOverlayEntrance(PAGE_COMPANION, drawGenomeProfilePage);
   } else if (page == PAGE_STATUS && statusShowingActions) {
     handleStatusGridTap(x, y);
-  } else if (page == PAGE_GENOME_LAB && y >= 374) {
-    const uint8_t mode = min<uint8_t>(3, x / 119 + 1);
+  } else if (page == PAGE_GENOME_LAB && y >= GENOME_LAB_BTN_Y - 6) {
+    const uint8_t mode = min<uint8_t>(3, x / (UI_WIDTH / 3) + 1);
     if (mode > 1 && !hasCopiedGenome) {
       strcpy(genomeTransferStatus, "IMPORT A GENOME FIRST");
       playTone(196, 100, 35);
@@ -1442,11 +1442,11 @@ bool gameOverlayActive() {
 void gameOverlayTouch(int16_t x, int16_t y, int16_t dx, int16_t dy, bool released) {
   if (!released) return;
   if (showingEvolutionDebug) {
-    if (y >= 285 && y < 365 && pet.stage < 4) {
+    if (y >= EVO_DEBUG_ADVANCE_Y - 12 && y < EVO_DEBUG_CANCEL_Y - 11 && pet.stage < 4) {
       debugAdvanceEvolution();
       showingEvolutionDebug = false;
       presentOverlayExit(drawEvolutionDebugPage, PAGE_COMPANION);
-    } else if (y >= 365) {
+    } else if (y >= EVO_DEBUG_CANCEL_Y - 11) {
       showingEvolutionDebug = false;
       presentOverlayExit(drawEvolutionDebugPage, PAGE_COMPANION);
     }
@@ -1482,11 +1482,12 @@ void gameOverlayTouch(int16_t x, int16_t y, int16_t dx, int16_t dy, bool release
         playTone(784, 30, 30);
         transitionGenomeProfileView(false);
       }
-    } else if (genomeProfileShowingData && y >= 270 && y < 316) {
+    } else if (genomeProfileShowingData && y >= GENOME_DATA_BTN_Y &&
+               y < GENOME_DATA_BTN_Y + GENOME_DATA_BTN_H) {
       if (x < UI_WIDTH / 2) exportActiveGenome();
       else importCopiedGenome();
       presentGenomeProfilePage();
-    } else if ((genomeProfileShowingData && y >= 393) ||
+    } else if ((genomeProfileShowingData && y >= GENOME_DATA_BACK_Y - 5) ||
                (!genomeProfileShowingData && dx > 55)) {
       showingGenomeProfile = false;
       presentOverlayExit(drawGenomeProfilePage, genomeProfileReturnPage);

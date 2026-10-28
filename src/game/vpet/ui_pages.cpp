@@ -9,6 +9,8 @@
 // native test suite already links for exactly this reason.
 #include "game/vpet/familiar_battle_rules.h"
 
+#include <cstring>
+
 uint16_t scaleRgb565(uint16_t color, uint8_t percent) {
   const uint16_t red = min<uint16_t>(31, ((color >> 11) & 0x1F) * percent / 100);
   const uint16_t green = min<uint16_t>(63, ((color >> 5) & 0x3F) * percent / 100);
@@ -77,8 +79,8 @@ void paintPageBackdrop() {
 
 void drawPanelGlow(int16_t x, int16_t y, int16_t w, int16_t h, int16_t radius,
                    uint16_t color) {
-  display->drawRoundRect(x - 6, y - 6, w + 12, h + 12, radius + 6, scaleRgb565(color, 12));
-  display->drawRoundRect(x - 3, y - 3, w + 6, h + 6, radius + 3, scaleRgb565(color, 22));
+  display->drawRoundRect(x - 8, y - 6, w + 12, h + 12, radius + 6, scaleRgb565(color, 12));
+  display->drawRoundRect(x - 4, y - 3, w + 6, h + 6, radius + 3, scaleRgb565(color, 22));
 }
 
 // Hand-pixelled 16x16 silhouettes, enlarged 2x for crisp 32x32 icons.
@@ -116,26 +118,26 @@ void drawStatIcon(StatIcon icon, int16_t x, int16_t y, uint16_t color) {
 void drawStatRow(StatIcon icon, uint8_t value, int16_t y) {
   const uint16_t color = value < 25 ? COLOR_DANGER :
       (value < 50 ? COLOR_WARNING : COLOR_MINT);
-  drawStatIcon(icon, 22, y - 17, color);
+  drawStatIcon(icon, 29, y - 18, color);
   // Label matches the value's own size 2 now (was 1) -- see
   // docs/style-guide.md's typography section: a label sitting right next
   // to the value it names reads as broken/mismatched at any different
   // size from that value, not just smaller-and-therefore-harder-to-read.
-  // The bar shifts right/narrows accordingly (138-280 instead of
-  // 112-280) to leave room for "ENERGY", the longest label, at the
-  // larger size.
+  // The bar starts far enough right to leave room for "ENERGY", the
+  // longest label, at the larger size.
   display->setTextSize(2);
   display->setTextColor(COLOR_TEXT);
-  display->setCursor(59, y - 7);
+  display->setCursor(77, y - 8);
   display->print(STAT_LABELS[icon]);
-  display->drawRoundRect(138, y - 7, 142, 18, 8, COLOR_MUTED);
+  constexpr int16_t kBarX = 180, kBarW = 218, kValueX = 410;
+  display->drawRoundRect(kBarX, y - 8, kBarW, 19, 8, COLOR_MUTED);
   if (value > 0) {
-    const int16_t filled = (136 * value) / 100;
-    display->fillRoundRect(141, y - 4, filled, 12, 6, color);
-    if (filled > 6) display->fillCircle(141 + filled - 6, y + 2, 5, lerpRgb565(color, RGB565_WHITE, 0.35f));
+    const int16_t filled = ((kBarW - 8) * value) / 100;
+    display->fillRoundRect(kBarX + 4, y - 4, filled, 13, 6, color);
+    if (filled > 6) display->fillCircle(kBarX + 4 + filled - 6, y + 2, 5, lerpRgb565(color, RGB565_WHITE, 0.35f));
   }
   display->setTextColor(COLOR_TEXT);
-  display->setCursor(294, y - 7);
+  display->setCursor(kValueX, y - 8);
   display->printf("%3u%%", value);
 }
 
@@ -162,16 +164,16 @@ void drawActionTile(uint8_t action, int16_t x, int16_t y, const char *label,
                     const char *value, bool locked) {
   const uint16_t accent = locked ? COLOR_MUTED : (action & 1 ? COLOR_PURPLE : COLOR_CYAN);
   const uint16_t fill = locked ? scaleRgb565(COLOR_CARD, 55) : COLOR_CARD;
-  drawPanelGlow(x, y, 160, 137, 20, accent);
-  display->fillRoundRect(x, y, 160, 137, 20, fill);
-  display->drawRoundRect(x, y, 160, 137, 20, accent);
+  drawPanelGlow(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, accent);
+  display->fillRoundRect(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, fill);
+  display->drawRoundRect(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, accent);
   const uint16_t iconColor = locked ? COLOR_MUTED : COLOR_MINT;
   if (action == 3) {
-    drawRadarIcon(x + 80, y + 43, iconColor);
+    drawRadarIcon(x + UI_TILE_W / 2, y + 46, iconColor);
   } else if (action == 4) {
-    drawSettingsIcon(4, x + 80, y + 43, iconColor);  // "theme palette" icon, reused for ITEMS.
+    drawSettingsIcon(4, x + UI_TILE_W / 2, y + 46, iconColor);  // "theme palette" icon, reused for ITEMS.
   } else if (action < 3) {
-    drawStatIcon(static_cast<StatIcon>(action), x + 64, y + 18, iconColor);
+    drawStatIcon(static_cast<StatIcon>(action), x + UI_TILE_W / 2 - 16, y + 19, iconColor);
   }
   // action >= 5 (a reserved-for-later placeholder) gets no icon at all.
   // label is size 2 (was 1) -- it's the tile's actual name (FEED, RECON
@@ -184,11 +186,11 @@ void drawActionTile(uint8_t action, int16_t x, int16_t y, const char *label,
   // tile's width at size 2.
   display->setTextSize(2);
   display->setTextColor(locked ? COLOR_MUTED : COLOR_TEXT);
-  display->setCursor(x + 16, y + 82);
+  display->setCursor(x + 21, y + 88);
   display->print(label);
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(x + 16, y + 104);
+  display->setCursor(x + 21, y + 111);
   display->print(value);
 }
 
@@ -205,108 +207,109 @@ void drawEgg(bool frame, uint16_t bg) {
   const PetPalette palette = paletteForGenome(pet.genome);
   const uint8_t lineage = pet.genome.lineage % 10;
   const uint8_t phase = (millis() / 90) % 32;
-  const int y = 218 + ((phase < 16 ? phase : 31 - phase) / 8);
+  const int cx = UI_CENTER_X;
+  const int y = COMPANION_PET_CY + ((phase < 16 ? phase : 31 - phase) / 8);
 
   // A compact aura and contact shadow establish depth without redrawing the UI.
   for (uint8_t i = 0; i < 6; ++i) {
     const int angleIndex = (phase + i * 5) & 31;
-    const int px = 184 + ((angleIndex < 16 ? angleIndex : 31 - angleIndex) - 8) * 8;
+    const int px = cx + ((angleIndex < 16 ? angleIndex : 31 - angleIndex) - 8) * 8;
     const int py = y - 8 + ((phase * 7 + i * 19) % 126) - 63;
     display->fillCircle(px, py, i & 1 ? 2 : 3,
                         i & 1 ? palette.glow : palette.accent);
   }
-  display->fillEllipse(184, y + 67, 72, 13, COLOR_CARD);
-  display->fillEllipse(184, y + 65, 56, 7, palette.primaryDark);
+  display->fillEllipse(cx, y + 67, 72, 13, COLOR_CARD);
+  display->fillEllipse(cx, y + 65, 56, 7, palette.primaryDark);
 
   // Offset nested shells produce a shaded, rounded volume on the AMOLED.
-  display->fillEllipse(184, y, 62, 79, COLOR_TEXT);
-  display->fillEllipse(184, y, 58, 75, palette.primaryDark);
-  display->fillEllipse(188, y - 3, 53, 70, palette.primary);
-  display->fillEllipse(194, y - 11, 43, 57, palette.primary);
-  display->fillEllipse(201, y - 22, 27, 37, palette.primaryLight);
-  display->fillEllipse(169, y + 19, 18, 42, palette.secondary);
-  display->fillEllipse(202, y - 31, 9, 17, palette.primaryLight);
-  display->fillCircle(200, y - 40, 3, lerpRgb565(palette.primaryLight, RGB565_WHITE, 0.7f));
-  display->fillEllipse(205, y - 36, 3, 6, COLOR_TEXT);
+  display->fillEllipse(cx, y, 62, 79, COLOR_TEXT);
+  display->fillEllipse(cx, y, 58, 75, palette.primaryDark);
+  display->fillEllipse(cx + 4, y - 3, 53, 70, palette.primary);
+  display->fillEllipse(cx + 10, y - 11, 43, 57, palette.primary);
+  display->fillEllipse(cx + 17, y - 22, 27, 37, palette.primaryLight);
+  display->fillEllipse(cx - 15, y + 19, 18, 42, palette.secondary);
+  display->fillEllipse(cx + 18, y - 31, 9, 17, palette.primaryLight);
+  display->fillCircle(cx + 16, y - 40, 3, lerpRgb565(palette.primaryLight, RGB565_WHITE, 0.7f));
+  display->fillEllipse(cx + 21, y - 36, 3, 6, COLOR_TEXT);
 
   // Each lineage owns a visual language; genes vary placement and palette.
   switch (lineage) {
     case 0: {  // Ember: animated molten fractures.
-      display->drawLine(171, y - 55, 183, y - 29, palette.glow);
-      display->drawLine(183, y - 29, 173, y - 5, palette.glow);
-      display->drawLine(173, y - 5, 188, y + 22, palette.accent);
-      display->drawLine(188, y + 22, 180, y + 48, palette.glow);
-      display->fillCircle(183, y - 29, frame ? 5 : 3, palette.accent);
+      display->drawLine(cx - 13, y - 55, cx - 1, y - 29, palette.glow);
+      display->drawLine(cx - 1, y - 29, cx - 11, y - 5, palette.glow);
+      display->drawLine(cx - 11, y - 5, cx + 4, y + 22, palette.accent);
+      display->drawLine(cx + 4, y + 22, cx - 4, y + 48, palette.glow);
+      display->fillCircle(cx - 1, y - 29, frame ? 5 : 3, palette.accent);
       break;
     }
     case 1:  // Tidal: layered wave bands and bubbles.
       for (int row = -30; row <= 34; row += 18) {
-        display->drawLine(151, y + row, 166, y + row - 5, palette.accent);
-        display->drawLine(166, y + row - 5, 184, y + row + 2, palette.accent);
-        display->drawLine(184, y + row + 2, 210, y + row - 4, palette.accent);
+        display->drawLine(cx - 33, y + row, cx - 18, y + row - 5, palette.accent);
+        display->drawLine(cx - 18, y + row - 5, cx, y + row + 2, palette.accent);
+        display->drawLine(cx, y + row + 2, cx + 26, y + row - 4, palette.accent);
       }
-      display->drawCircle(204, y + 30 - phase / 3, 5, palette.glow);
-      display->drawCircle(164, y - 18 - phase / 4, 3, palette.glow);
+      display->drawCircle(cx + 20, y + 30 - phase / 3, 5, palette.glow);
+      display->drawCircle(cx - 20, y - 18 - phase / 4, 3, palette.glow);
       break;
     case 2:  // Verdant: branching leaf veins.
-      display->drawLine(184, y + 53, 184, y - 48, palette.accent);
+      display->drawLine(cx, y + 53, cx, y - 48, palette.accent);
       for (int branch = -34; branch <= 34; branch += 17) {
-        display->drawLine(184, y + branch, 158, y + branch - 14, palette.secondary);
-        display->drawLine(184, y + branch - 7, 211, y + branch - 23, palette.accent);
+        display->drawLine(cx, y + branch, cx - 26, y + branch - 14, palette.secondary);
+        display->drawLine(cx, y + branch - 7, cx + 27, y + branch - 23, palette.accent);
       }
-      display->fillTriangle(177, y - 65, 184, y - 82, 190, y - 62, palette.glow);
+      display->fillTriangle(cx - 7, y - 65, cx, y - 82, cx + 6, y - 62, palette.glow);
       break;
     case 3:  // Volt: angular circuit paths.
-      display->drawLine(158, y - 42, 181, y - 42, palette.accent);
-      display->drawLine(181, y - 42, 171, y - 15, palette.accent);
-      display->drawLine(171, y - 15, 197, y - 15, palette.glow);
-      display->drawLine(197, y - 15, 185, y + 17, palette.glow);
-      display->drawLine(185, y + 17, 210, y + 17, palette.accent);
+      display->drawLine(cx - 26, y - 42, cx - 3, y - 42, palette.accent);
+      display->drawLine(cx - 3, y - 42, cx - 13, y - 15, palette.accent);
+      display->drawLine(cx - 13, y - 15, cx + 13, y - 15, palette.glow);
+      display->drawLine(cx + 13, y - 15, cx + 1, y + 17, palette.glow);
+      display->drawLine(cx + 1, y + 17, cx + 26, y + 17, palette.accent);
       for (int i = 0; i < 4; ++i)
-        display->fillCircle(158 + i * 17, y + 42 - (i & 1) * 10, 3,
+        display->fillCircle(cx - 26 + i * 17, y + 42 - (i & 1) * 10, 3,
                             (phase + i) & 2 ? palette.glow : palette.accent);
       break;
     case 4:  // Umbral: iris-like sigil with an orbiting glint.
-      display->fillEllipse(184, y + 1, 31, 19, palette.secondary);
-      display->fillEllipse(184, y + 1, 20, 14, palette.accent);
-      display->fillEllipse(184, y + 1, 8, 14, palette.primaryDark);
-      display->fillCircle(188, y - 4, 3, palette.glow);
-      display->drawCircle(184, y + 1, 37 + (frame ? 2 : 0), palette.glow);
+      display->fillEllipse(cx, y + 1, 31, 19, palette.secondary);
+      display->fillEllipse(cx, y + 1, 20, 14, palette.accent);
+      display->fillEllipse(cx, y + 1, 8, 14, palette.primaryDark);
+      display->fillCircle(cx + 4, y - 4, 3, palette.glow);
+      display->drawCircle(cx, y + 1, 37 + (frame ? 2 : 0), palette.glow);
       break;
     case 5:  // Digital: asymmetric data blocks and traces.
       for (uint8_t i = 0; i < 9; ++i) {
-        const int bx = 151 + ((pet.genome.seed[0] >> (i * 3 % 24)) & 0x2F);
+        const int bx = cx - 33 + ((pet.genome.seed[0] >> (i * 3 % 24)) & 0x2F);
         const int by = y - 49 + ((pet.genome.seed[1] >> (i * 3 % 24)) & 0x5F);
         display->fillRect(bx, by, 5 + (i & 3) * 2, 5,
                           i & 1 ? palette.accent : palette.secondary);
       }
-      display->drawRect(169, y - 25, 31, 46, palette.glow);
-      display->fillRect(178, y - 16 + phase / 4, 13, 4, RGB565_WHITE);
+      display->drawRect(cx - 15, y - 25, 31, 46, palette.glow);
+      display->fillRect(cx - 6, y - 16 + phase / 4, 13, 4, RGB565_WHITE);
       break;
     case 6:  // Crystal: luminous facets.
-      display->fillTriangle(184, y - 59, 157, y - 4, 184, y + 9, palette.secondary);
-      display->fillTriangle(184, y - 59, 214, y - 7, 184, y + 9, palette.accent);
-      display->fillTriangle(157, y - 4, 184, y + 9, 166, y + 49, palette.primaryDark);
-      display->fillTriangle(214, y - 7, 184, y + 9, 204, y + 46, palette.glow);
-      display->drawLine(184, y - 59, 184, y + 55, RGB565_WHITE);
+      display->fillTriangle(cx, y - 59, cx - 27, y - 4, cx, y + 9, palette.secondary);
+      display->fillTriangle(cx, y - 59, cx + 30, y - 7, cx, y + 9, palette.accent);
+      display->fillTriangle(cx - 27, y - 4, cx, y + 9, cx - 18, y + 49, palette.primaryDark);
+      display->fillTriangle(cx + 30, y - 7, cx, y + 9, cx + 20, y + 46, palette.glow);
+      display->drawLine(cx, y - 59, cx, y + 55, RGB565_WHITE);
       break;
     case 7:  // Alloy: segmented armour shell.
-      display->drawLine(145, y - 25, 223, y - 25, palette.accent);
-      display->drawLine(135, y + 8, 232, y + 8, palette.secondary);
-      display->drawLine(148, y + 40, 218, y + 40, palette.accent);
-      display->drawLine(184, y - 71, 184, y + 62, palette.primaryDark);
+      display->drawLine(cx - 39, y - 25, cx + 39, y - 25, palette.accent);
+      display->drawLine(cx - 49, y + 8, cx + 48, y + 8, palette.secondary);
+      display->drawLine(cx - 36, y + 40, cx + 34, y + 40, palette.accent);
+      display->drawLine(cx, y - 71, cx, y + 62, palette.primaryDark);
       for (int sy : {-25, 8, 40}) {
-        display->fillCircle(153, y + sy, 4, palette.glow);
-        display->fillCircle(215, y + sy, 4, palette.glow);
+        display->fillCircle(cx - 31, y + sy, 4, palette.glow);
+        display->fillCircle(cx + 31, y + sy, 4, palette.glow);
       }
       break;
     case 8:  // Celestial: constellation joined across the shell.
       for (uint8_t i = 0; i < 6; ++i) {
-        const int sx = 157 + ((pet.genome.seed[2] >> (i * 4)) & 0x37);
+        const int sx = cx - 27 + ((pet.genome.seed[2] >> (i * 4)) & 0x37);
         const int sy = y - 47 + ((pet.genome.seed[3] >> (i * 4)) & 0x5F);
         display->fillCircle(sx, sy, i == (phase / 6) % 6 ? 4 : 2, palette.accent);
         if (i) {
-          const int px = 157 + ((pet.genome.seed[2] >> ((i - 1) * 4)) & 0x37);
+          const int px = cx - 27 + ((pet.genome.seed[2] >> ((i - 1) * 4)) & 0x37);
           const int py = y - 47 + ((pet.genome.seed[3] >> ((i - 1) * 4)) & 0x5F);
           display->drawLine(px, py, sx, sy, palette.glow);
         }
@@ -315,16 +318,16 @@ void drawEgg(bool frame, uint16_t bg) {
     default:  // Primal: scale plates and a claw glyph.
       for (int row = -37; row <= 35; row += 18)
         for (int column = -24; column <= 24; column += 16)
-          display->drawCircle(184 + column + ((row / 18) & 1) * 8,
+          display->drawCircle(cx + column + ((row / 18) & 1) * 8,
                               y + row, 9, palette.secondary);
-      display->drawLine(170, y - 38, 181, y + 32, palette.accent);
-      display->drawLine(184, y - 42, 190, y + 31, palette.accent);
-      display->drawLine(198, y - 35, 198, y + 28, palette.accent);
+      display->drawLine(cx - 14, y - 38, cx - 3, y + 32, palette.accent);
+      display->drawLine(cx, y - 42, cx + 6, y + 31, palette.accent);
+      display->drawLine(cx + 14, y - 35, cx + 14, y + 28, palette.accent);
       break;
   }
 
   if (pet.genome.mutationGenes) {
-    display->drawCircle(184, y, 66 + (frame ? 2 : 0), palette.glow);
+    display->drawCircle(cx, y, 66 + (frame ? 2 : 0), palette.glow);
   }
 }
 
@@ -471,8 +474,8 @@ void drawProceduralCreature(bool asleep) {
   const int wave = phase < 16 ? phase : 31 - phase;
   const int bob = asleep ? 5 : (wave - 8) / 4;
   const bool blink = asleep || (millis() % 3400) > 3260;
-  const int cx = 184;
-  const int baseY = 316 + bob;
+  const int cx = UI_CENTER_X;
+  const int baseY = COMPANION_PET_BASE_Y + bob;
   const int growth = (stage - 1) * 9;
   const uint8_t widthGene = evolvedGenomeGene(pet.genome, pet.genome.widthGene,
                                                stage, 0, 24);
@@ -785,18 +788,14 @@ void drawCreature(bool frame, bool asleep) {
 
 
 void drawPageDots(Page active) {
-  // PAGE_STATUS used to sit at y=355, tuned for the old single-view Status
-  // page's FEED/PLAY/TRAIN row starting at y=375 -- now that those moved
-  // into the action grid (drawStatusActionsView(), which runs to y=364)
-  // and the summary view's own hints sit at y=374/399 (drawStatusSummaryView(),
-  // matching the Companion page's identical hint-line convention), the
-  // default 425 clears both sub-views cleanly and there's no more reason
-  // for Status to be the odd one out.
-  const int16_t y = active >= PAGE_SETTINGS ? 437 : 425;
+  // One row for the swipeable pages, sitting under the hint lines the
+  // Companion and Status pages draw near the bottom; Settings and Genome
+  // Lab run their grids lower, so their dots sit a little lower too.
+  const int16_t y = active >= PAGE_SETTINGS ? 461 : 453;
   const Page pages[] = {PAGE_COMPANION, PAGE_STATUS, PAGE_BATTLE,
                         PAGE_SETTINGS, PAGE_GENOME_LAB};
   for (uint8_t i = 0; i < 5; ++i) {
-    display->fillCircle(152 + i * 16, y, 4,
+    display->fillCircle(UI_CENTER_X - 32 + i * 16, y, 4,
                         active == pages[i] ? COLOR_MINT : COLOR_CARD);
   }
 }
@@ -812,26 +811,26 @@ void drawCompanionPage() {
   // either.
   char name[PET_NAME_LENGTH];
   petDisplayName(pet.genome, name, sizeof(name));
-  drawCentered(name, 15, 3, COLOR_MINT);
+  drawCentered(name, 16, 3, COLOR_MINT);
   display->setTextSize(1);
   display->setTextColor(COLOR_CYAN);
-  display->setCursor(28, 49);
+  display->setCursor(37, 52);
   display->print(pet.stage == 0 ? eggLineageName(pet.genome.lineage)
                                 : STAGE_NAMES[pet.stage]);
   display->setTextSize(2);
   display->setTextColor(clockValid ? COLOR_TEXT : COLOR_MUTED);
-  display->setCursor(288, 45);
+  display->setCursor(376, 48);
   display->print(clockText);
-  drawPanelGlow(20, 82, 328, 276, 32, COLOR_CYAN);
-  display->drawRoundRect(20, 82, 328, 276, 32, COLOR_CARD);
-  display->drawRoundRect(27, 89, 314, 262, 27, COLOR_CYAN);
-  display->fillRect(14, 126, 18, 5, COLOR_PURPLE);
-  display->fillRect(336, 309, 18, 5, COLOR_MINT);
-  display->drawCircle(54, 111, 8, COLOR_MINT);
-  display->drawCircle(332, 329, 8, COLOR_PURPLE);
+  drawPanelGlow(26, 88, 428, 296, 32, COLOR_CYAN);
+  display->drawRoundRect(26, 88, 428, 296, 32, COLOR_CARD);
+  display->drawRoundRect(35, 95, 410, 281, 27, COLOR_CYAN);
+  display->fillRect(18, 135, 24, 5, COLOR_PURPLE);
+  display->fillRect(438, 331, 24, 5, COLOR_MINT);
+  display->drawCircle(70, 119, 8, COLOR_MINT);
+  display->drawCircle(433, 352, 8, COLOR_PURPLE);
   drawCreature(false, false);
-  drawCentered("TAP PET FOR PROFILE", 374, 1, COLOR_MUTED);
-  drawCentered("SWIPE FOR STATUS  >", 399, 1, COLOR_CYAN);
+  drawCentered("TAP PET FOR PROFILE", 401, 1, COLOR_MUTED);
+  drawCentered("SWIPE FOR STATUS  >", 428, 1, COLOR_CYAN);
   drawPageDots(PAGE_COMPANION);
 }
 
@@ -856,7 +855,7 @@ void formatBatteryTimeRemaining(char *out, size_t outSize) {
 // FEED stopped being an instant tap and started being a several-second
 // scan (performFeedScan(), main.cpp) worth a swipe away from the numbers.
 void drawStatusSummaryView() {
-  drawCentered("COMPANION STATUS", 18, 3, COLOR_MINT);
+  drawCentered("COMPANION STATUS", 19, 3, COLOR_MINT);
   char identity[40];
   if (pet.stage == 0) {
     snprintf(identity, sizeof(identity), "%s // %s",
@@ -865,11 +864,11 @@ void drawStatusSummaryView() {
     snprintf(identity, sizeof(identity), "%s // %s",
              STAGE_NAMES[pet.stage], elementName(pet.genome.element));
   }
-  drawCentered(identity, 49, 1, COLOR_CYAN);
-  drawStatRow(ICON_FOOD, pet.food, 82);
-  drawStatRow(ICON_JOY, pet.joy, 128);
-  drawStatRow(ICON_ENERGY, pet.energy, 174);
-  drawStatRow(ICON_HEALTH, pet.health, 220);
+  drawCentered(identity, 52, 1, COLOR_CYAN);
+  drawStatRow(ICON_FOOD, pet.food, 88);
+  drawStatRow(ICON_JOY, pet.joy, 137);
+  drawStatRow(ICON_ENERGY, pet.energy, 186);
+  drawStatRow(ICON_HEALTH, pet.health, 236);
 
   // Used to be a 2x2 IMU/RTC/BATT/SOUND hardware-diagnostics grid; IMU
   // isn't used by anything in this app and RTC/SOUND failures already show
@@ -879,17 +878,17 @@ void drawStatusSummaryView() {
   // used) and, on row 2, whichever of "currently charging" or "estimated
   // time left" is actually relevant right now. All 4 hardware checks stay
   // in the Serial boot log (detectHardware(), main.cpp) either way.
-  drawPanelGlow(25, 251, 318, 91, 18, COLOR_CYAN);
-  display->fillRoundRect(25, 251, 318, 91, 18, COLOR_CARD);
+  drawPanelGlow(33, 269, 414, 97, 18, COLOR_CYAN);
+  display->fillRoundRect(33, 269, 414, 97, 18, COLOR_CARD);
   char battLine[16];
   snprintf(battLine, sizeof(battLine), "BATTERY %u%%", batteryPercent);
-  drawCentered(pmuDetected ? battLine : "PWR --", 265, 2,
+  drawCentered(pmuDetected ? battLine : "PWR --", 284, 2,
               !pmuDetected ? COLOR_DANGER
               : batteryCharging ? COLOR_CYAN
               : batteryPercent <= 15 ? COLOR_DANGER : COLOR_MINT);
   if (pmuDetected) {
     if (batteryCharging) {
-      drawCentered("CHARGING", 294, 2, COLOR_CYAN);
+      drawCentered("CHARGING", 315, 2, COLOR_CYAN);
     } else if (!clockValid) {
       // A genuinely different, more useful thing to say than "estimating"
       // -- without a synced clock there's no way to time a transition at
@@ -898,13 +897,13 @@ void drawStatusSummaryView() {
       // plugging in USB to see Serial output, which starts charging the
       // device and hides the very thing being checked -- see this
       // conversation's own back-and-forth on why that doesn't work here.
-      drawCentered("NO CLOCK SYNC", 294, 2, COLOR_DANGER);
+      drawCentered("NO CLOCK SYNC", 315, 2, COLOR_DANGER);
     } else if (batteryTimeEstimateValid) {
       char remaining[8];
       formatBatteryTimeRemaining(remaining, sizeof(remaining));
       char timeLine[24];
       snprintf(timeLine, sizeof(timeLine), "%s REMAINING", remaining);
-      drawCentered(timeLine, 294, 2, COLOR_MUTED);
+      drawCentered(timeLine, 315, 2, COLOR_MUTED);
     } else {
       // Elapsed wait time instead of a static ellipsis -- same reasoning
       // as the NO CLOCK SYNC line above: this needs to be checkable from
@@ -913,18 +912,18 @@ void drawStatusSummaryView() {
       char waitingLine[20];
       snprintf(waitingLine, sizeof(waitingLine), "WAITING (%luM)",
                (unsigned long)batteryMinutesSinceTransition);
-      drawCentered(waitingLine, 294, 2, COLOR_MUTED);
+      drawCentered(waitingLine, 315, 2, COLOR_MUTED);
     }
   }
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(45, 324);
+  display->setCursor(59, 347);
   display->printf("AGE %lumin  CARE %lu  TRAIN %u%%  //  %u DEV",
                   (unsigned long)pet.ageMinutes, (unsigned long)pet.actions,
                   pet.training, i2cDeviceCount);
 
-  drawCentered("SWIPE UP FOR ACTIONS", 374, 1, COLOR_MUTED);
-  drawCentered("FEED // PLAY // TRAIN // RECON", 399, 1, COLOR_CYAN);
+  drawCentered("SWIPE UP FOR ACTIONS", 401, 1, COLOR_MUTED);
+  drawCentered("FEED // PLAY // TRAIN // RECON", 428, 1, COLOR_CYAN);
 }
 
 // The action grid sub-view (statusShowingActions == true) -- same 2x2
@@ -932,29 +931,29 @@ void drawStatusSummaryView() {
 // its exact tile geometry so the two grids feel like the same control.
 // Unlike Settings' grid this is a single page (4 items, no paging needed).
 void drawStatusActionsView() {
-  drawCentered("COMPANION ACTIONS", 18, 3, COLOR_MINT);
+  drawCentered("COMPANION ACTIONS", 19, 3, COLOR_MINT);
   drawCentered(statusActionsPage == 0 ? "SELECT AN ACTION // SWIPE UP"
                                       : "SELECT AN ACTION // SWIPE DOWN",
-               51, 1, COLOR_CYAN);
+               55, 1, COLOR_CYAN);
 
   if (statusActionsPage == 0) {
-    drawActionTile(0, 18, 78, "FEED", "SCAN WIFI+BLE");
-    drawActionTile(1, 190, 78, "PLAY", "BOOST JOY");
-    drawActionTile(2, 18, 227, "TRAIN", "BOOST STATS");
+    drawActionTile(0, UI_TILE_X[0], UI_TILE_Y[0], "FEED", "SCAN WIFI+BLE");
+    drawActionTile(1, UI_TILE_X[1], UI_TILE_Y[0], "PLAY", "BOOST JOY");
+    drawActionTile(2, UI_TILE_X[0], UI_TILE_Y[1], "TRAIN", "BOOST STATS");
     char reconValue[16];
     snprintf(reconValue, sizeof(reconValue), "%u SIGNALS", reconLog.entryCount);
-    drawActionTile(3, 190, 227, "RECON LOG", reconValue);
+    drawActionTile(3, UI_TILE_X[1], UI_TILE_Y[1], "RECON LOG", reconValue);
   } else {
     char itemsValue[16];
     const uint16_t itemCount = inventory.counts[0] + inventory.counts[1] +
         inventory.counts[2] + inventory.counts[3] + inventory.counts[4];
     snprintf(itemsValue, sizeof(itemsValue), "%u HELD", itemCount);
-    drawActionTile(4, 18, 78, "ITEMS", itemsValue);
-    drawActionTile(5, 190, 78, "LOCKED", "COMING SOON", /*locked=*/true);
-    drawActionTile(6, 18, 227, "LOCKED", "COMING SOON", /*locked=*/true);
-    drawActionTile(7, 190, 227, "LOCKED", "COMING SOON", /*locked=*/true);
+    drawActionTile(4, UI_TILE_X[0], UI_TILE_Y[0], "ITEMS", itemsValue);
+    drawActionTile(5, UI_TILE_X[1], UI_TILE_Y[0], "LOCKED", "COMING SOON", /*locked=*/true);
+    drawActionTile(6, UI_TILE_X[0], UI_TILE_Y[1], "LOCKED", "COMING SOON", /*locked=*/true);
+    drawActionTile(7, UI_TILE_X[1], UI_TILE_Y[1], "LOCKED", "COMING SOON", /*locked=*/true);
   }
-  drawCentered(statusActionsPage == 0 ? "1  /  2" : "2  /  2", 382, 1, COLOR_MUTED);
+  drawCentered(statusActionsPage == 0 ? "1  /  2" : "2  /  2", 409, 1, COLOR_MUTED);
 }
 
 void drawStatusPage() {
@@ -1026,23 +1025,23 @@ void drawSettingsTile(uint8_t item, int16_t x, int16_t y,
                       const char *label, const char *value, bool locked) {
   const uint16_t accent = locked ? COLOR_MUTED : (item & 1 ? COLOR_PURPLE : COLOR_CYAN);
   const uint16_t fill = locked ? scaleRgb565(COLOR_CARD, 55) : COLOR_CARD;
-  drawPanelGlow(x, y, 160, 137, 20, accent);
-  display->fillRoundRect(x, y, 160, 137, 20, fill);
-  display->drawRoundRect(x, y, 160, 137, 20, accent);
+  drawPanelGlow(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, accent);
+  display->fillRoundRect(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, fill);
+  display->drawRoundRect(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, accent);
   // Same "locked tile gets no icon at all" convention as drawActionTile()'s
   // own reserved-for-later tiles.
-  if (!locked) drawSettingsIcon(item, x + 80, y + 43, COLOR_MINT);
+  if (!locked) drawSettingsIcon(item, x + UI_TILE_W / 2, y + 46, COLOR_MINT);
   // Same label-is-size-2/value-is-size-1 "title/subtitle" role split as
   // drawActionTile() -- see that function's own comment. "BOOT EFFECT",
-  // the longest label here, is 132px at size 2 starting from x+16 in a
-  // 160px-wide tile -- fits with a few px to spare before the edge.
+  // the longest label here, is 132px at size 2 starting from x+21 in a
+  // UI_TILE_W-wide tile.
   display->setTextSize(2);
   display->setTextColor(locked ? COLOR_MUTED : COLOR_TEXT);
-  display->setCursor(x + 16, y + 82);
+  display->setCursor(x + 21, y + 88);
   display->print(label);
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(x + 16, y + 104);
+  display->setCursor(x + 21, y + 111);
   display->print(value);
 }
 
@@ -1061,25 +1060,25 @@ void drawCenteredInRect(const char *text, int16_t x, int16_t y,
 
 
 void drawSettingsBack() {
-  drawPanelGlow(84, 385, 200, 43, 14, COLOR_CYAN);
-  display->fillRoundRect(84, 385, 200, 43, 14, COLOR_CARD);
-  display->drawRoundRect(84, 385, 200, 43, 14, COLOR_CYAN);
-  drawCenteredInRect("<  BACK", 84, 385, 200, 43, 2, COLOR_TEXT);
+  drawPanelGlow(UI_BACK_X, UI_BACK_Y, UI_BACK_W, UI_BACK_H, 14, COLOR_CYAN);
+  display->fillRoundRect(UI_BACK_X, UI_BACK_Y, UI_BACK_W, UI_BACK_H, 14, COLOR_CARD);
+  display->drawRoundRect(UI_BACK_X, UI_BACK_Y, UI_BACK_W, UI_BACK_H, 14, COLOR_CYAN);
+  drawCenteredInRect("<  BACK", UI_BACK_X, UI_BACK_Y, UI_BACK_W, UI_BACK_H, 2, COLOR_TEXT);
 }
 
 
 void drawChoiceRow(const char *label, int16_t y, bool selected) {
   const uint16_t fill = selected ? COLOR_PURPLE : COLOR_CARD;
-  display->fillRoundRect(28, y, 312, 48, 14, fill);
-  display->drawRoundRect(28, y, 312, 48, 14,
+  display->fillRoundRect(37, y, 406, SETTINGS_CHOICE_H, 14, fill);
+  display->drawRoundRect(37, y, 406, SETTINGS_CHOICE_H, 14,
                          selected ? COLOR_MINT : COLOR_MUTED);
   display->setTextSize(2);
   display->setTextColor(readableTextColor(fill));
-  display->setCursor(47, y + 17);
+  display->setCursor(61, y + 18);
   display->print(label);
   if (selected) {
-    display->fillCircle(316, y + 24, 8, COLOR_MINT);
-    display->fillCircle(316, y + 24, 3, COLOR_BACKGROUND);
+    display->fillCircle(412, y + 26, 8, COLOR_MINT);
+    display->fillCircle(412, y + 26, 3, COLOR_BACKGROUND);
   }
 }
 
@@ -1117,39 +1116,42 @@ void drawSettingsControlPage() {
   paintPageBackdrop();
   const char *titles[] = {"SETTINGS", "BRIGHTNESS", "IDLE TIMER", "VOLUME",
                           "WAKE MODE", "THEME", "BOOT EFFECT"};
-  drawCentered(titles[settingsView], 18, 3, COLOR_MINT);
-  drawCentered("SELECT AN OPTION", 51, 1, COLOR_CYAN);
+  drawCentered(titles[settingsView], 19, 3, COLOR_MINT);
+  drawCentered("SELECT AN OPTION", 55, 1, COLOR_CYAN);
 
   if (settingsView == SETTINGS_BRIGHTNESS) {
     for (uint8_t value = 0; value <= 10; ++value) {
       const uint8_t column = value % 3;
       const uint8_t row = value / 3;
-      const int16_t x = 22 + column * 113;
-      const int16_t y = 83 + row * 68;
+      const int16_t x = SETTINGS_BRIGHT_X0 + column * SETTINGS_BRIGHT_PITCH_X;
+      const int16_t y = SETTINGS_BRIGHT_Y0 + row * SETTINGS_BRIGHT_PITCH_Y;
       const bool selected = settings.brightnessIndex == value;
       const uint16_t fill = selected ? COLOR_PURPLE : COLOR_CARD;
-      display->fillRoundRect(x, y, 98, 53, 13, fill);
-      display->drawRoundRect(x, y, 98, 53, 13,
+      display->fillRoundRect(x, y, SETTINGS_BRIGHT_W, SETTINGS_BRIGHT_H, 13, fill);
+      display->drawRoundRect(x, y, SETTINGS_BRIGHT_W, SETTINGS_BRIGHT_H, 13,
                              selected ? COLOR_MINT : COLOR_MUTED);
       char percent[8];
       snprintf(percent, sizeof(percent), "%u%%", value * 10);
-      drawCenteredInRect(percent, x, y, 98, 53, 2, readableTextColor(fill));
+      drawCenteredInRect(percent, x, y, SETTINGS_BRIGHT_W, SETTINGS_BRIGHT_H, 2,
+                         readableTextColor(fill));
     }
   } else if (settingsView == SETTINGS_IDLE) {
     for (uint8_t i = 0; i < 4; ++i)
-      drawChoiceRow(SLEEP_LABELS[i], 89 + i * 62, settings.sleepIndex == i);
+      drawChoiceRow(SLEEP_LABELS[i], SETTINGS_IDLE_Y0 + i * SETTINGS_IDLE_PITCH,
+                    settings.sleepIndex == i);
   } else if (settingsView == SETTINGS_VOLUME) {
     for (uint8_t i = 0; i < 5; ++i)
-      drawChoiceRow(VOLUME_LABELS[i], 78 + i * 57, settings.volumeIndex == i);
+      drawChoiceRow(VOLUME_LABELS[i], SETTINGS_LIST_Y0 + i * SETTINGS_LIST_PITCH,
+                    settings.volumeIndex == i);
   } else if (settingsView == SETTINGS_THEME) {
     for (uint8_t i = 0; i < 5; ++i) {
-      const int16_t y = 78 + i * 57;
+      const int16_t y = SETTINGS_LIST_Y0 + i * SETTINGS_LIST_PITCH;
       drawChoiceRow(THEME_LABELS[i], y, settings.themeIndex == i);
-      drawThemeSwatch(240, y + 24, i);
+      drawThemeSwatch(313, y + 26, i);
     }
   } else if (settingsView == SETTINGS_BOOT) {
-    drawChoiceRow("BOOT EFFECT ON", 130, settings.bootAnimationEnabled);
-    drawChoiceRow("BOOT EFFECT OFF", 199, !settings.bootAnimationEnabled);
+    drawChoiceRow("BOOT EFFECT ON", SETTINGS_BOOT_ON_Y, settings.bootAnimationEnabled);
+    drawChoiceRow("BOOT EFFECT OFF", SETTINGS_BOOT_OFF_Y, !settings.bootAnimationEnabled);
   }
   drawSettingsBack();
 }
@@ -1162,29 +1164,29 @@ void drawSettingsPage() {
     return;
   }
   paintPageBackdrop();
-  drawCentered("DEVICE SETTINGS", 18, 3, COLOR_MINT);
+  drawCentered("DEVICE SETTINGS", 19, 3, COLOR_MINT);
   drawCentered(settingsGridPage == 0 ? "CORE CONTROLS // SWIPE UP" :
                                       "SYSTEM OPTIONS // SWIPE DOWN",
-               50, 1, COLOR_CYAN);
+               54, 1, COLOR_CYAN);
 
   if (settingsGridPage == 0) {
     char brightness[12];
     snprintf(brightness, sizeof(brightness), "%u%%", brightnessPercent());
-    drawSettingsTile(0, 18, 78, "BRIGHTNESS", brightness);
-    drawSettingsTile(1, 190, 78, "IDLE TIMER", SLEEP_LABELS[settings.sleepIndex]);
-    drawSettingsTile(2, 18, 227, "VOLUME", VOLUME_LABELS[settings.volumeIndex]);
+    drawSettingsTile(0, UI_TILE_X[0], UI_TILE_Y[0], "BRIGHTNESS", brightness);
+    drawSettingsTile(1, UI_TILE_X[1], UI_TILE_Y[0], "IDLE TIMER", SLEEP_LABELS[settings.sleepIndex]);
+    drawSettingsTile(2, UI_TILE_X[0], UI_TILE_Y[1], "VOLUME", VOLUME_LABELS[settings.volumeIndex]);
     // Wake Mode was retired: touch no longer wakes the device at all (only
     // the power key does, see main.cpp's pollPowerButton()), so there's no
     // longer a choice here to present. Same locked-placeholder treatment
     // the Status page's own reserved tiles use.
-    drawSettingsTile(3, 190, 227, "LOCKED", "COMING SOON", /*locked=*/true);
+    drawSettingsTile(3, UI_TILE_X[1], UI_TILE_Y[1], "LOCKED", "COMING SOON", /*locked=*/true);
   } else {
-    drawSettingsTile(4, 18, 78, "THEME", THEME_LABELS[settings.themeIndex]);
-    drawSettingsTile(5, 190, 78, "BOOT EFFECT", settings.bootAnimationEnabled ? "ENABLED" : "DISABLED");
-    drawSettingsTile(6, 18, 227, "PLAYER ID", "VIEW IDENTITY");
-    drawSettingsTile(7, 190, 227, "FIRMWARE", "CHECK UPDATE");
+    drawSettingsTile(4, UI_TILE_X[0], UI_TILE_Y[0], "THEME", THEME_LABELS[settings.themeIndex]);
+    drawSettingsTile(5, UI_TILE_X[1], UI_TILE_Y[0], "BOOT EFFECT", settings.bootAnimationEnabled ? "ENABLED" : "DISABLED");
+    drawSettingsTile(6, UI_TILE_X[0], UI_TILE_Y[1], "PLAYER ID", "VIEW IDENTITY");
+    drawSettingsTile(7, UI_TILE_X[1], UI_TILE_Y[1], "FIRMWARE", "CHECK UPDATE");
   }
-  drawCentered(settingsGridPage == 0 ? "1  /  2" : "2  /  2", 382, 1, COLOR_MUTED);
+  drawCentered(settingsGridPage == 0 ? "1  /  2" : "2  /  2", 409, 1, COLOR_MUTED);
   drawPageDots(PAGE_SETTINGS);
 }
 
@@ -1193,27 +1195,27 @@ void drawGenomeLabPage() {
   static const char *bodyNames[] = {"QUADRUPED", "HUMANOID", "AVIAN", "BLOB", "SERPENT"};
   static const char *temperaments[] = {"CALM", "BOLD", "CURIOUS", "LOYAL", "WILD", "CLEVER"};
   paintPageBackdrop();
-  drawCentered("GENOME LAB", 15, 3, COLOR_MINT);
+  drawCentered("GENOME LAB", 16, 3, COLOR_MINT);
   drawCentered(hasCopiedGenome ? "COPIED GENOME READY" :
                                 "IMPORT A GENOME TO CLONE OR BLEND",
-               48, 1, COLOR_CYAN);
+               51, 1, COLOR_CYAN);
 
-  drawPanelGlow(20, 74, 328, 244, 28, COLOR_PURPLE);
-  display->drawRoundRect(20, 74, 328, 244, 28, COLOR_CARD);
-  display->drawRoundRect(27, 81, 314, 230, 23, COLOR_PURPLE);
+  drawPanelGlow(26, 79, 428, 262, 28, COLOR_PURPLE);
+  display->drawRoundRect(26, 79, 428, 262, 28, COLOR_CARD);
+  display->drawRoundRect(35, 87, 410, 246, 23, COLOR_PURPLE);
   drawEgg(animationFrame, COLOR_BACKGROUND);
 
   char fingerprint[28];
   snprintf(fingerprint, sizeof(fingerprint), "DESIGN %016llX",
            static_cast<unsigned long long>(petGenomeDesignId(pet.genome)));
-  display->fillRoundRect(22, 325, 324, 43, 13, COLOR_CARD);
+  display->fillRoundRect(29, 348, 422, 46, 13, COLOR_CARD);
   display->setTextSize(1);
   display->setTextColor(COLOR_TEXT);
-  display->setCursor(34, 337);
+  display->setCursor(44, 361);
   display->printf("%s  //  %s", eggLineageName(pet.genome.lineage),
                   elementName(pet.genome.element));
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(34, 352);
+  display->setCursor(44, 377);
   display->printf("%s  %s  %s", bodyNames[pet.genome.bodyType % 5],
                   temperaments[pet.genome.temperament % 6], fingerprint);
 
@@ -1221,16 +1223,16 @@ void drawGenomeLabPage() {
   const char *labels[] = {"RANDOM", "CLONE", "BLEND"};
   for (uint8_t i = 0; i < 3; ++i) {
     const uint8_t mode = i + 1;
-    const int16_t x = 11 + i * 119;
+    const int16_t x = GENOME_LAB_BTN_X0 + i * GENOME_LAB_BTN_PITCH;
     const bool available = mode == 1 || hasCopiedGenome;
     const bool selected = confirming && pendingHatchMode == mode;
     const uint16_t fill = !available ? COLOR_MUTED :
                           (selected ? COLOR_DANGER : COLOR_PURPLE);
-    display->fillRoundRect(x, 378, 108, 46, 13, fill);
+    display->fillRoundRect(x, GENOME_LAB_BTN_Y, GENOME_LAB_BTN_W, GENOME_LAB_BTN_H, 13, fill);
     // Size 2 (was 1) -- "CONFIRM", the longest of these, is 84px at size 2
-    // and fits easily inside this 108px-wide button.
-    drawCenteredInRect(selected ? "CONFIRM" : labels[i], x, 378, 108, 46,
-                       2, readableTextColor(fill));
+    // and fits easily inside the button.
+    drawCenteredInRect(selected ? "CONFIRM" : labels[i], x, GENOME_LAB_BTN_Y,
+                       GENOME_LAB_BTN_W, GENOME_LAB_BTN_H, 2, readableTextColor(fill));
   }
   drawPageDots(PAGE_GENOME_LAB);
 }
@@ -1248,10 +1250,10 @@ static const char *kGenomeTemperaments[] = {"CALM", "BOLD", "CURIOUS", "LOYAL", 
 // kRowPitch=36, panel 22,76,324,260), just with genome traits instead of
 // battle stats.
 void drawGenomeIdentityView() {
-  drawCentered("IDENTITY", 51, 1, COLOR_CYAN);
+  drawCentered("IDENTITY", 55, 1, COLOR_CYAN);
 
-  drawPanelGlow(22, 76, 324, 260, 26, COLOR_CYAN);
-  display->fillRoundRect(22, 76, 324, 260, 26, COLOR_CARD);
+  drawPanelGlow(29, 81, 422, 279, 26, COLOR_CYAN);
+  display->fillRoundRect(29, 81, 422, 279, 26, COLOR_CARD);
 
   char traitCount[4];
   snprintf(traitCount, sizeof(traitCount), "%u", __builtin_popcount(pet.genome.featureGenes));
@@ -1271,12 +1273,12 @@ void drawGenomeIdentityView() {
     const int16_t y = kFirstRowY + i * kRowPitch;
     display->setTextSize(2);
     display->setTextColor(COLOR_MUTED);
-    display->setCursor(46, y - 7);
+    display->setCursor(60, y - 8);
     display->print(labels[i]);
-    drawCenteredInRect(values[i], 190, y - 7, 136, 22, 2, COLOR_TEXT);
+    drawCenteredInRect(values[i], 248, y - 8, 177, 24, 2, COLOR_TEXT);
   }
 
-  drawCentered("SWIPE UP FOR GENOME DATA", 356, 1, COLOR_MUTED);
+  drawCentered("SWIPE UP FOR GENOME DATA", 381, 1, COLOR_MUTED);
 }
 
 // The genome-data sub-view -- the 60-character code (now at size 2, was 1
@@ -1287,39 +1289,40 @@ void drawGenomeIdentityView() {
 // pair). BACK button hit-test region (main.cpp) keys off this exact
 // 84,398,200,36 rect, same as before this page's redesign.
 void drawGenomeDataView() {
-  drawCentered(genomeTransferStatus, 51, 1, COLOR_CYAN);
+  drawCentered(genomeTransferStatus, 55, 1, COLOR_CYAN);
 
   char code[PET_GENOME_CODE_LENGTH + 1]{};
   encodePetGenome(pet.genome, code, sizeof(code));
-  drawPanelGlow(14, 82, 340, 116, 22, COLOR_PURPLE);
-  display->fillRoundRect(14, 82, 340, 116, 22, COLOR_CARD);
+  drawPanelGlow(18, 88, 444, 124, 22, COLOR_PURPLE);
+  display->fillRoundRect(18, 88, 444, 124, 22, COLOR_CARD);
   display->setTextSize(2);
   display->setTextColor(COLOR_CYAN);
   for (uint8_t row = 0; row < 3; ++row) {
     char segment[21]{};
     memcpy(segment, code + row * 20, 20);
-    drawCenteredInRect(segment, 14, 92 + row * 34, 340, 24, 2, COLOR_CYAN);
+    drawCenteredInRect(segment, 18, 92 + row * 34, 444, 26, 2, COLOR_CYAN);
   }
 
   char designLine[32];
   snprintf(designLine, sizeof(designLine), "DESIGN %016llX",
            static_cast<unsigned long long>(petGenomeDesignId(pet.genome)));
-  drawCentered(designLine, 218, 1, COLOR_MUTED);
+  drawCentered(designLine, 234, 1, COLOR_MUTED);
 
-  drawCentered("SWIPE DOWN FOR IDENTITY", 244, 1, COLOR_MUTED);
+  drawCentered("SWIPE DOWN FOR IDENTITY", 261, 1, COLOR_MUTED);
 
-  display->fillRoundRect(18, 270, 160, 46, 14, COLOR_PURPLE);
-  display->fillRoundRect(190, 270, 160, 46, 14, COLOR_CYAN);
-  drawCenteredInRect("EXPORT", 18, 270, 160, 46, 2, readableTextColor(COLOR_PURPLE));
-  drawCenteredInRect("IMPORT COPY", 190, 270, 160, 46, 2, readableTextColor(COLOR_CYAN));
+  const int16_t btnY = GENOME_DATA_BTN_Y, btnH = GENOME_DATA_BTN_H;
+  display->fillRoundRect(23, btnY, 209, btnH, 14, COLOR_PURPLE);
+  display->fillRoundRect(248, btnY, 209, btnH, 14, COLOR_CYAN);
+  drawCenteredInRect("EXPORT", 23, btnY, 209, btnH, 2, readableTextColor(COLOR_PURPLE));
+  drawCenteredInRect("IMPORT COPY", 248, btnY, 209, btnH, 2, readableTextColor(COLOR_CYAN));
 
-  display->fillRoundRect(84, 398, 200, 36, 12, COLOR_CARD);
-  drawCenteredInRect("BACK", 84, 398, 200, 36, 2, COLOR_TEXT);
+  display->fillRoundRect(110, GENOME_DATA_BACK_Y, 260, 39, 12, COLOR_CARD);
+  drawCenteredInRect("BACK", 110, GENOME_DATA_BACK_Y, 260, 39, 2, COLOR_TEXT);
 }
 
 void drawGenomeProfilePage() {
   paintPageBackdrop();
-  drawCentered("GENOME PROFILE", 18, 3, COLOR_MINT);
+  drawCentered("GENOME PROFILE", 19, 3, COLOR_MINT);
   if (genomeProfileShowingData) {
     drawGenomeDataView();
   } else {
@@ -1349,21 +1352,21 @@ void drawBattleMoveIcon(BattleMoveIcon icon, int16_t x, int16_t y, uint16_t colo
 
 
 void drawOpponentRow(const FamiliarBattleOpponent &opponent, int16_t y) {
-  drawPanelGlow(24, y, 320, 68, 18, COLOR_CYAN);
-  display->fillRoundRect(24, y, 320, 68, 18, COLOR_CARD);
-  display->drawRoundRect(24, y, 320, 68, 18, COLOR_CYAN);
+  drawPanelGlow(31, y, 418, BATTLE_PICKER_ROW_H, 18, COLOR_CYAN);
+  display->fillRoundRect(31, y, 418, BATTLE_PICKER_ROW_H, 18, COLOR_CARD);
+  display->drawRoundRect(31, y, 418, BATTLE_PICKER_ROW_H, 18, COLOR_CYAN);
   display->setTextSize(2);
   display->setTextColor(COLOR_TEXT);
-  display->setCursor(44, y + 14);
+  display->setCursor(57, y + 15);
   display->print(opponent.stageIndex < 5 ? STAGE_NAMES[opponent.stageIndex] : "UNKNOWN");
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(44, y + 42);
+  display->setCursor(57, y + 45);
   display->printf("LEVEL %u", opponent.level);
   const uint8_t bars = opponent.rssi > -60 ? 3 : opponent.rssi > -75 ? 2 : 1;
   for (uint8_t b = 0; b < 3; ++b) {
     const int16_t bh = 8 + b * 6;
-    display->fillRect(298 + b * 10, y + 50 - bh, 6, bh,
+    display->fillRect(298 + b * 10, y + 50 - bh, 8, bh,
                       b < bars ? COLOR_MINT : COLOR_MUTED);
   }
 }
@@ -1376,31 +1379,27 @@ void drawOpponentRow(const FamiliarBattleOpponent &opponent, int16_t y) {
 void drawBattleResultsPage(const std::vector<FamiliarBattleOpponent> &results,
                            uint8_t page) {
   paintPageBackdrop();
-  drawCentered("SELECT OPPONENT", 20, 2, COLOR_MINT);
+  drawCentered("SELECT OPPONENT", 21, 2, COLOR_MINT);
   const uint8_t totalPages = max<uint8_t>(
       1, (results.size() + kBattleResultsPerPage - 1) / kBattleResultsPerPage);
   const uint8_t start = page * kBattleResultsPerPage;
   for (uint8_t i = 0; i < kBattleResultsPerPage; ++i) {
     const size_t index = start + i;
     if (index >= results.size()) break;
-    drawOpponentRow(results[index], 66 + i * 76);
+    drawOpponentRow(results[index], BATTLE_PICKER_Y0 + i * BATTLE_PICKER_PITCH);
   }
   if (totalPages > 1) {
     char pageLabel[12];
     snprintf(pageLabel, sizeof(pageLabel), "%u / %u", page + 1, totalPages);
-    drawCentered(pageLabel, 300, 1, COLOR_MUTED);
-    drawCentered("SWIPE FOR MORE", 320, 1, COLOR_MUTED);
+    drawCentered(pageLabel, 321, 1, COLOR_MUTED);
+    drawCentered("SWIPE FOR MORE", 343, 1, COLOR_MUTED);
   }
-  display->fillRoundRect(84, 385, 200, 43, 14, COLOR_CARD);
-  display->drawRoundRect(84, 385, 200, 43, 14, COLOR_CYAN);
-  drawCenteredInRect("CANCEL", 84, 385, 200, 43, 2, COLOR_TEXT);
-  // No drawPageDots() here: this button sits at the same (84, 385, 200, 43)
+  display->fillRoundRect(UI_BACK_X, UI_BACK_Y, UI_BACK_W, UI_BACK_H, 14, COLOR_CARD);
+  display->drawRoundRect(UI_BACK_X, UI_BACK_Y, UI_BACK_W, UI_BACK_H, 14, COLOR_CYAN);
+  drawCenteredInRect("CANCEL", UI_BACK_X, UI_BACK_Y, UI_BACK_W, UI_BACK_H, 2, COLOR_TEXT);
+  // No drawPageDots() here: this button sits at the same UI_BACK_*
   // geometry as drawSettingsControlPage()'s own back button, which omits the
-  // dots for exactly this reason -- drawPageDots(PAGE_BATTLE) draws at
-  // y=425 with radius 4 (spanning y:421-429), overlapping this button's
-  // y:385-428 span. Was previously called anyway (an inconsistency with the
-  // Settings sub-view, not a deliberate difference), producing a page-dot
-  // row visibly overlapping the Cancel button.
+  // dots for exactly this reason -- the page-dot row would overlap it.
 }
 
 // A small icon-and-glow button, matching the settings tile treatment, used
@@ -1414,7 +1413,7 @@ void drawBattleButton(int16_t x, int16_t y, int16_t w, int16_t h, int16_t radius
   drawBattleMoveIcon(icon, x + w / 2 - 16, y + 6, labelColor);
   display->setTextSize(2);
   display->setTextColor(labelColor);
-  drawCenteredInRect(label, x, y + h - 20, w, 18, 2, labelColor);
+  drawCenteredInRect(label, x, y + h - 20, w, 19, 2, labelColor);
 }
 
 // Shared "in battle" layout for both the live Battling/Result states and the
@@ -1430,33 +1429,34 @@ void drawBattlingLayout(uint16_t myHp, uint16_t myMaxHp, uint16_t opponentHp,
                         bool opponentGenomeAvailable, bool genomeCopied,
                         const PetGenome *opponentGenome) {
   const PetPalette myPalette = paletteForGenome(pet.genome);
-  drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 90, 96, 62, myPalette.glow);
+  drawCreaturePortrait(pet.genome, max<uint8_t>(pet.stage, 1), 117, 103, 62, myPalette.glow);
   if (opponentGenome) {
-    drawCreaturePortrait(*opponentGenome, 4, 278, 96, 62, COLOR_DANGER);
+    drawCreaturePortrait(*opponentGenome, 4, 363, 103, 62, COLOR_DANGER);
   } else {
     // Opponent genome hasn't finished arriving over BLE yet -- a neutral
     // placeholder rather than guessing at their creature's appearance.
-    display->fillCircle(278, 96, 43, scaleRgb565(COLOR_DANGER, 16));
-    display->drawCircle(278, 96, 41, COLOR_DANGER);
-    display->fillCircle(278, 96, 35, COLOR_CARD);
+    display->fillCircle(363, 103, 43, scaleRgb565(COLOR_DANGER, 16));
+    display->drawCircle(363, 103, 41, COLOR_DANGER);
+    display->fillCircle(363, 103, 35, COLOR_CARD);
     display->setTextSize(3);
     display->setTextColor(COLOR_MUTED);
-    display->setCursor(270, 80);
+    display->setCursor(352, 86);
     display->print("?");
   }
 
   display->setTextSize(1);
   display->setTextColor(COLOR_TEXT);
-  display->setCursor(74, 138); display->print("YOU");
-  display->setCursor(240, 138); display->printf("OPP LV%u", opponentLevel);
+  display->setCursor(97, 148); display->print("YOU");
+  display->setCursor(313, 148); display->printf("OPP LV%u", opponentLevel);
 
+  constexpr int16_t kHpBarW = 200, kHpBarMargin = 24;
   auto hpBar = [&](int16_t x, uint16_t hp, uint16_t maxHp, uint16_t color) {
-    display->drawRoundRect(x, 150, 144, 17, 7, COLOR_MUTED);
+    display->drawRoundRect(x, 161, kHpBarW, 18, 7, COLOR_MUTED);
     if (hp && maxHp) {
-      const int16_t filled = 138 * hp / maxHp;
-      display->fillRoundRect(x + 3, 153, filled, 11, 5, color);
+      const int16_t filled = (kHpBarW - 8) * hp / maxHp;
+      display->fillRoundRect(x + 4, 164, filled, 12, 5, color);
       if (filled > 6) {
-        display->fillCircle(x + 3 + filled - 6, 158, 5,
+        display->fillCircle(x + 3 + filled - 6, 169, 5,
                             lerpRgb565(color, RGB565_WHITE, 0.35f));
       }
     }
@@ -1465,13 +1465,18 @@ void drawBattlingLayout(uint16_t myHp, uint16_t myMaxHp, uint16_t opponentHp,
       myHp * 100 / max<uint16_t>(1, myMaxHp) < 30 ? COLOR_DANGER : COLOR_MINT;
   const uint16_t oppHpColor =
       opponentHp * 100 / max<uint16_t>(1, opponentMaxHp) < 30 ? COLOR_WARNING : COLOR_DANGER;
-  hpBar(24, myHp, myMaxHp, myHpColor);
-  hpBar(200, opponentHp, opponentMaxHp, oppHpColor);
-  display->setCursor(24, 172); display->printf("%u / %u", myHp, myMaxHp);
-  display->setCursor(268, 172); display->printf("%u / %u", opponentHp, opponentMaxHp);
-  drawCentered(enhancedLink ? "ENHANCED LINK" : "CORE LINK", 188, 1,
+  hpBar(kHpBarMargin, myHp, myMaxHp, myHpColor);
+  hpBar(UI_WIDTH - kHpBarMargin - kHpBarW, opponentHp, opponentMaxHp, oppHpColor);
+  display->setCursor(kHpBarMargin + 7, 184); display->printf("%u / %u", myHp, myMaxHp);
+  char oppHpText[16];
+  snprintf(oppHpText, sizeof(oppHpText), "%u / %u", opponentHp, opponentMaxHp);
+  // Size-1 glyphs are 6 px wide; right-aligned under the opponent's bar.
+  display->setCursor(UI_WIDTH - kHpBarMargin - 7 - 6 * static_cast<int16_t>(strlen(oppHpText)), 184);
+  display->print(oppHpText);
+  drawCentered(enhancedLink ? "ENHANCED LINK" : "CORE LINK", 198, 1,
               enhancedLink ? COLOR_MINT : COLOR_MUTED);
 
+  constexpr int16_t kCardX = 24, kCardW = UI_WIDTH - 2 * kCardX, kCardY = 214;
   if (!isResult) {
     // A compact two-line log ("you did this, they did that") instead of a
     // big decorative VS panel, freeing up height for a proper 2x2 move
@@ -1479,52 +1484,53 @@ void drawBattlingLayout(uint16_t myHp, uint16_t myMaxHp, uint16_t opponentHp,
     // one row. Text size bumped to 2 for readability; the log messages
     // themselves (familiar_battle_service.cpp's addLog calls) were shortened
     // to fit at this size.
-    drawPanelGlow(24, 196, 320, 72, 18, COLOR_PURPLE);
-    display->fillRoundRect(24, 196, 320, 72, 18, COLOR_CARD);
+    drawPanelGlow(kCardX, kCardY, kCardW, 70, 18, COLOR_PURPLE);
+    display->fillRoundRect(kCardX, kCardY, kCardW, 70, 18, COLOR_CARD);
     display->setTextSize(2);
     display->setTextColor(COLOR_MUTED);
-    display->setCursor(36, 208);
+    display->setCursor(kCardX + 18, kCardY + 13);
     display->print(logLine1);
     display->setTextColor(COLOR_TEXT);
-    display->setCursor(36, 234);
+    display->setCursor(kCardX + 18, kCardY + 41);
     display->print(logLine2);
 
     const char *labels[] = {"ATK", "DEF", "SPEC", fleeArmed ? "CONFIRM?" : "FLEE"};
     const uint16_t colors[] = {COLOR_DANGER, COLOR_CYAN, COLOR_PURPLE,
                                fleeArmed ? COLOR_WARNING : COLOR_MUTED};
-    constexpr int16_t colX[] = {24, 194};
-    constexpr int16_t rowY[] = {280, 336};
     for (uint8_t i = 0; i < 4; ++i) {
-      drawBattleButton(colX[i % 2], rowY[i / 2], 150, 50, 14, colors[i],
+      drawBattleButton(BATTLE_BTN_X[i % 2], BATTLE_MOVE_Y[i / 2], BATTLE_BTN_W,
+                       BATTLE_MOVE_H, BATTLE_BTN_RADIUS, colors[i],
                        static_cast<BattleMoveIcon>(i), labels[i]);
     }
     drawCentered(fleeArmed ? "TAP FLEE AGAIN TO CONFIRM" :
-                moveSubmitted ? "WAITING FOR OPPONENT" : "SELECT MOVE", 396, 1,
+                moveSubmitted ? "WAITING FOR OPPONENT" : "SELECT MOVE", 434, 1,
                 fleeArmed ? COLOR_WARNING :
                 moveSubmitted ? COLOR_WARNING : COLOR_MINT);
     return;
   }
 
-  drawPanelGlow(24, 198, 320, 98, 22, COLOR_PURPLE);
-  display->fillRoundRect(24, 198, 320, 98, 22, COLOR_CARD);
-  drawCentered("BATTLE COMPLETE", 224, 3, COLOR_WARNING);
-  drawCentered(logLine2, 278, 1, COLOR_TEXT);
+  drawPanelGlow(kCardX, kCardY, kCardW, 104, 22, COLOR_PURPLE);
+  display->fillRoundRect(kCardX, kCardY, kCardW, 104, 22, COLOR_CARD);
+  drawCentered("BATTLE COMPLETE", kCardY + 28, 3, COLOR_WARNING);
+  drawCentered(logLine2, kCardY + 84, 1, COLOR_TEXT);
 
   if (opponentGenomeAvailable) {
-    drawPanelGlow(18, 305, 160, 54, 14, COLOR_PURPLE);
-    drawPanelGlow(190, 305, 160, 54, 14, COLOR_CYAN);
-    display->fillRoundRect(18, 305, 160, 54, 14, COLOR_PURPLE);
-    display->fillRoundRect(190, 305, 160, 54, 14, COLOR_CYAN);
+    const int16_t y = BATTLE_RESULT_BTN_Y, h = BATTLE_RESULT_BTN_H;
+    drawPanelGlow(BATTLE_BTN_X[0], y, BATTLE_BTN_W, h, BATTLE_BTN_RADIUS, COLOR_PURPLE);
+    drawPanelGlow(BATTLE_BTN_X[1], y, BATTLE_BTN_W, h, BATTLE_BTN_RADIUS, COLOR_CYAN);
+    display->fillRoundRect(BATTLE_BTN_X[0], y, BATTLE_BTN_W, h, BATTLE_BTN_RADIUS, COLOR_PURPLE);
+    display->fillRoundRect(BATTLE_BTN_X[1], y, BATTLE_BTN_W, h, BATTLE_BTN_RADIUS, COLOR_CYAN);
     // Both buttons at size 2 -- was 1 vs. 2, an inconsistency between two
     // equally-weighted CTAs on the same row with no reason for one to
     // read smaller than the other. "COPY GENOME", the longer of the two
     // labels either button ever shows, is 132px at size 2 and fits inside
-    // this 160px-wide button.
-    drawCenteredInRect(genomeCopied ? "COPIED" : "COPY GENOME", 18, 305, 160, 54, 2,
-                       readableTextColor(COLOR_PURPLE));
-    drawCenteredInRect("RETURN", 190, 305, 160, 54, 2, readableTextColor(COLOR_CYAN));
+    // the button.
+    drawCenteredInRect(genomeCopied ? "COPIED" : "COPY GENOME", BATTLE_BTN_X[0], y,
+                       BATTLE_BTN_W, h, 2, readableTextColor(COLOR_PURPLE));
+    drawCenteredInRect("RETURN", BATTLE_BTN_X[1], y, BATTLE_BTN_W, h, 2,
+                       readableTextColor(COLOR_CYAN));
   } else {
-    drawCentered("TAP TO RETURN", 330, 2, COLOR_CYAN);
+    drawCentered("TAP TO RETURN", BATTLE_RESULT_BTN_Y + 22, 2, COLOR_CYAN);
   }
 }
 
@@ -1533,10 +1539,10 @@ void drawBattlingLayout(uint16_t myHp, uint16_t myMaxHp, uint16_t opponentHp,
 // the single cramped "LV 5 HP.. ATK.. DEF.." header line the old one-
 // screen Idle state used to draw.
 void drawBattleStatsView() {
-  drawCentered("BATTLE STATS", 51, 1, COLOR_CYAN);
+  drawCentered("BATTLE STATS", 55, 1, COLOR_CYAN);
 
-  drawPanelGlow(22, 76, 324, 260, 26, COLOR_CYAN);
-  display->fillRoundRect(22, 76, 324, 260, 26, COLOR_CARD);
+  drawPanelGlow(29, 81, 422, 279, 26, COLOR_CYAN);
+  display->fillRoundRect(29, 81, 422, 279, 26, COLOR_CARD);
 
   // Mirrors main.cpp's battleCapabilities() special-value formula -- the
   // actual value sent into a real battle. Unlike HP/ATK/DEF just below,
@@ -1560,23 +1566,23 @@ void drawBattleStatsView() {
   // Label and value are the same size 2 -- see docs/style-guide.md's
   // typography section: this was the exact size-1-label-next-to-size-2-
   // value mismatch reported as hard to read. "DEFENSE", the longest
-  // label, is 84px at size 2 starting from x=46, comfortably inside the
-  // gap before the value column starts at x=190.
+  // label, is 84px at size 2, comfortably inside the gap before the value
+  // column.
   for (uint8_t i = 0; i < 6; ++i) {
     const int16_t y = kFirstRowY + i * kRowPitch;
     display->setTextSize(2);
     display->setTextColor(COLOR_MUTED);
-    display->setCursor(46, y - 7);
+    display->setCursor(60, y - 8);
     display->print(labels[i]);
-    drawCenteredInRect(values[i], 190, y - 7, 136, 22, 2, COLOR_TEXT);
+    drawCenteredInRect(values[i], 248, y - 8, 177, 24, 2, COLOR_TEXT);
   }
 
   char recordLine[32];
   snprintf(recordLine, sizeof(recordLine), "RECORD %luW - %luL",
            (unsigned long)battleStats.wins, (unsigned long)battleStats.losses);
-  drawCentered(recordLine, 312, 1, COLOR_MUTED);
+  drawCentered(recordLine, 334, 1, COLOR_MUTED);
 
-  drawCentered("SWIPE UP FOR BATTLE ACTIONS", 356, 1, COLOR_MUTED);
+  drawCentered("SWIPE UP FOR BATTLE ACTIONS", 381, 1, COLOR_MUTED);
 }
 
 // Three ascending bars (a podium/leaderboard look, echoing
@@ -1603,24 +1609,24 @@ void drawFriendsIcon(int16_t cx, int16_t cy, uint16_t color) {
 void drawBattleActionTile(BattleGridTile tile, int16_t x, int16_t y, const char *label,
                           const char *value) {
   const uint16_t accent = (tile == GRID_HOST || tile == GRID_RIVALS) ? COLOR_PURPLE : COLOR_CYAN;
-  drawPanelGlow(x, y, 160, 137, 20, accent);
-  display->fillRoundRect(x, y, 160, 137, 20, COLOR_CARD);
-  display->drawRoundRect(x, y, 160, 137, 20, accent);
+  drawPanelGlow(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, accent);
+  display->fillRoundRect(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, COLOR_CARD);
+  display->drawRoundRect(x, y, UI_TILE_W, UI_TILE_H, UI_TILE_RADIUS, accent);
   switch (tile) {
-    case GRID_HOST: drawBattleMoveIcon(ICON_DEFEND, x + 64, y + 18, COLOR_MINT); break;
-    case GRID_FIND: drawBattleMoveIcon(ICON_SPECIAL, x + 64, y + 18, COLOR_MINT); break;
-    case GRID_RIVALS: drawRivalsIcon(x + 80, y + 43, COLOR_MINT); break;
-    case GRID_FRIENDS: drawFriendsIcon(x + 80, y + 43, COLOR_MINT); break;
+    case GRID_HOST: drawBattleMoveIcon(ICON_DEFEND, x + UI_TILE_W / 2 - 16, y + 19, COLOR_MINT); break;
+    case GRID_FIND: drawBattleMoveIcon(ICON_SPECIAL, x + UI_TILE_W / 2 - 16, y + 19, COLOR_MINT); break;
+    case GRID_RIVALS: drawRivalsIcon(x + UI_TILE_W / 2, y + 46, COLOR_MINT); break;
+    case GRID_FRIENDS: drawFriendsIcon(x + UI_TILE_W / 2, y + 46, COLOR_MINT); break;
   }
   // Same label-is-size-2/value-is-size-1 "title/subtitle" role split as
   // drawActionTile() -- see that function's own comment.
   display->setTextSize(2);
   display->setTextColor(COLOR_TEXT);
-  display->setCursor(x + 16, y + 82);
+  display->setCursor(x + 21, y + 88);
   display->print(label);
   display->setTextSize(1);
   display->setTextColor(COLOR_MUTED);
-  display->setCursor(x + 16, y + 104);
+  display->setCursor(x + 21, y + 111);
   display->print(value);
 }
 
@@ -1630,17 +1636,17 @@ void drawBattleActionTile(BattleGridTile tile, int16_t x, int16_t y, const char 
 // same relationship the Status action grid's tiles have with
 // handleStatusGridTap().
 void drawBattleActionsView() {
-  drawCentered("SELECT AN ACTION // SWIPE DOWN", 51, 1, COLOR_CYAN);
+  drawCentered("SELECT AN ACTION // SWIPE DOWN", 55, 1, COLOR_CYAN);
 
-  drawBattleActionTile(GRID_HOST, 18, 78, "HOST", "OPEN SIGNAL");
-  drawBattleActionTile(GRID_FIND, 190, 78, "FIND", "SCAN FOR HOSTS");
+  drawBattleActionTile(GRID_HOST, UI_TILE_X[0], UI_TILE_Y[0], "HOST", "OPEN SIGNAL");
+  drawBattleActionTile(GRID_FIND, UI_TILE_X[1], UI_TILE_Y[0], "FIND", "SCAN FOR HOSTS");
   char recordValue[16];
   snprintf(recordValue, sizeof(recordValue), "%luW-%luL", (unsigned long)battleStats.wins,
            (unsigned long)battleStats.losses);
-  drawBattleActionTile(GRID_RIVALS, 18, 227, "RIVALS", recordValue);
+  drawBattleActionTile(GRID_RIVALS, UI_TILE_X[0], UI_TILE_Y[1], "RIVALS", recordValue);
   char friendsValue[16];
   snprintf(friendsValue, sizeof(friendsValue), "%u ADDED", friendsList.count);
-  drawBattleActionTile(GRID_FRIENDS, 190, 227, "FRIENDS", friendsValue);
+  drawBattleActionTile(GRID_FRIENDS, UI_TILE_X[1], UI_TILE_Y[1], "FRIENDS", friendsValue);
 }
 
 
@@ -1651,16 +1657,16 @@ void drawBattleActionsView() {
 // identity WHOAMI and the Player ID screen already surface as hex).
 void drawRivalsPage() {
   paintPageBackdrop();
-  drawCentered("RIVALS", 18, 3, COLOR_MINT);
-  drawCentered("WIN-LOSS BY OPPONENT", 51, 1, COLOR_CYAN);
+  drawCentered("RIVALS", 19, 3, COLOR_MINT);
+  drawCentered("WIN-LOSS BY OPPONENT", 55, 1, COLOR_CYAN);
 
-  drawPanelGlow(20, 70, 328, 310, 26, COLOR_PURPLE);
-  display->fillRoundRect(20, 70, 328, 310, 26, COLOR_CARD);
-  display->drawRoundRect(27, 77, 314, 296, 21, COLOR_PURPLE);
+  drawPanelGlow(26, 75, 428, 332, 26, COLOR_PURPLE);
+  display->fillRoundRect(26, 75, 428, 332, 26, COLOR_CARD);
+  display->drawRoundRect(35, 82, 410, 318, 21, COLOR_PURPLE);
 
   if (battleStats.rivalCount == 0) {
-    drawCentered("NO RIVALS YET", 205, 2, COLOR_TEXT);
-    drawCentered("BATTLE SOMEONE TO START", 234, 1, COLOR_MUTED);
+    drawCentered("NO RIVALS YET", 220, 2, COLOR_TEXT);
+    drawCentered("BATTLE SOMEONE TO START", 251, 1, COLOR_MUTED);
   } else {
     constexpr int16_t kFirstRowY = 92;
     constexpr int16_t kRowPitch = 35;
@@ -1669,15 +1675,15 @@ void drawRivalsPage() {
       const int16_t y = kFirstRowY + i * kRowPitch;
       display->setTextSize(2);
       display->setTextColor(COLOR_TEXT);
-      display->setCursor(46, y);
+      display->setCursor(60, y);
       display->printf("%08lX", (unsigned long)rival.playerId);
       display->setTextColor(rival.wins >= rival.losses ? COLOR_MINT : COLOR_DANGER);
-      display->setCursor(216, y);
+      display->setCursor(282, y);
       display->printf("%uW-%uL", rival.wins, rival.losses);
     }
   }
 
-  drawCentered("TAP TO RETURN", 396, 2, COLOR_CYAN);
+  drawCentered("TAP TO RETURN", 424, 2, COLOR_CYAN);
 }
 
 // A full-screen overlay, opened from the Status page's action grid's
@@ -1687,16 +1693,16 @@ void drawRivalsPage() {
 // small persistent discovery log, not a live view of anything.
 void drawReconLogPage() {
   paintPageBackdrop();
-  drawCentered("RECON LOG", 18, 3, COLOR_MINT);
-  drawCentered("SIGNALS DISCOVERED", 51, 1, COLOR_CYAN);
+  drawCentered("RECON LOG", 19, 3, COLOR_MINT);
+  drawCentered("SIGNALS DISCOVERED", 55, 1, COLOR_CYAN);
 
-  drawPanelGlow(20, 70, 328, 310, 26, COLOR_PURPLE);
-  display->fillRoundRect(20, 70, 328, 310, 26, COLOR_CARD);
-  display->drawRoundRect(27, 77, 314, 296, 21, COLOR_PURPLE);
+  drawPanelGlow(26, 75, 428, 332, 26, COLOR_PURPLE);
+  display->fillRoundRect(26, 75, 428, 332, 26, COLOR_CARD);
+  display->drawRoundRect(35, 82, 410, 318, 21, COLOR_PURPLE);
 
   if (reconLog.entryCount == 0) {
-    drawCentered("NO SIGNALS YET", 205, 2, COLOR_TEXT);
-    drawCentered("FEED YOUR PET TO SCAN", 234, 1, COLOR_MUTED);
+    drawCentered("NO SIGNALS YET", 220, 2, COLOR_TEXT);
+    drawCentered("FEED YOUR PET TO SCAN", 251, 1, COLOR_MUTED);
   } else {
     constexpr int16_t kFirstRowY = 92;
     constexpr int16_t kRowPitch = 35;
@@ -1705,16 +1711,16 @@ void drawReconLogPage() {
       const int16_t y = kFirstRowY + i * kRowPitch;
       display->setTextSize(2);
       display->setTextColor(COLOR_TEXT);
-      display->setCursor(46, y);
+      display->setCursor(60, y);
       display->print(entry.kind == 0 && entry.label[0] ? entry.label
                      : entry.kind == 0 ? "HIDDEN AP" : "BLE DEVICE");
       display->setTextColor(entry.kind == 0 ? COLOR_CYAN : COLOR_PURPLE);
-      display->setCursor(272, y);
+      display->setCursor(355, y);
       display->print(entry.kind == 0 ? "WIFI" : "BLE");
     }
   }
 
-  drawCentered("TAP TO RETURN", 396, 2, COLOR_CYAN);
+  drawCentered("TAP TO RETURN", 424, 2, COLOR_CYAN);
 }
 
 // A full-screen overlay, opened from a tappable line on the Battle Idle
@@ -1733,28 +1739,28 @@ static bool isFriendId(uint32_t playerId) {
 static void drawFriendsFooter(uint8_t page) {
   for (uint8_t i = 0; i < 3; ++i) {
     const int16_t y = 185 + (static_cast<int16_t>(i) - page) * 13;
-    display->fillCircle(356, y, i == page ? 4 : 2, i == page ? COLOR_MINT : COLOR_MUTED);
+    display->fillCircle(464, y, i == page ? 4 : 2, i == page ? COLOR_MINT : COLOR_MUTED);
   }
   drawCentered(page == 0 ? "SWIPE UP FOR DISCOVERY" :
                page == 2 ? "SWIPE DOWN FOR DIRECTORY" : "SWIPE UP OR DOWN",
-               373, 1, COLOR_MUTED);
-  display->fillRoundRect(92, 388, 184, 46, 14, COLOR_CARD);
-  display->drawRoundRect(92, 388, 184, 46, 14, COLOR_CYAN);
-  drawCentered("BACK", 404, 2, COLOR_TEXT);
+               400, 1, COLOR_MUTED);
+  display->fillRoundRect(120, FRIENDS_BACK_Y, 240, 49, 14, COLOR_CARD);
+  display->drawRoundRect(120, FRIENDS_BACK_Y, 240, 49, 14, COLOR_CYAN);
+  drawCentered("BACK", FRIENDS_BACK_Y + 17, 2, COLOR_TEXT);
 }
 
 void drawFriendsDirectoryPage() {
   paintPageBackdrop();
-  drawCentered("FRIENDS", 18, 3, COLOR_MINT);
-  drawCentered("DIRECTORY // 1 OF 3", 51, 1, COLOR_CYAN);
+  drawCentered("FRIENDS", 19, 3, COLOR_MINT);
+  drawCentered("DIRECTORY // 1 OF 3", 55, 1, COLOR_CYAN);
 
-  drawPanelGlow(20, 70, 328, 310, 26, COLOR_PURPLE);
-  display->fillRoundRect(20, 70, 328, 310, 26, COLOR_CARD);
-  display->drawRoundRect(27, 77, 314, 296, 21, COLOR_PURPLE);
+  drawPanelGlow(26, 75, 428, 332, 26, COLOR_PURPLE);
+  display->fillRoundRect(26, 75, 428, 332, 26, COLOR_CARD);
+  display->drawRoundRect(35, 82, 410, 318, 21, COLOR_PURPLE);
 
   if (friendsList.count == 0) {
-    drawCentered("NO FRIENDS YET", 205, 2, COLOR_TEXT);
-    drawCentered("SWIPE UP TO DISCOVER", 234, 1, COLOR_MUTED);
+    drawCentered("NO FRIENDS YET", 220, 2, COLOR_TEXT);
+    drawCentered("SWIPE UP TO DISCOVER", 251, 1, COLOR_MUTED);
   } else {
     constexpr int16_t kFirstRowY = 92;
     constexpr int16_t kRowPitch = 35;
@@ -1763,7 +1769,7 @@ void drawFriendsDirectoryPage() {
       const int16_t y = kFirstRowY + i * kRowPitch;
       display->setTextSize(2);
       display->setTextColor(COLOR_TEXT);
-      display->setCursor(46, y);
+      display->setCursor(60, y);
       display->printf("%08lX", (unsigned long)friendEntry.playerId);
     }
   }
@@ -1772,33 +1778,33 @@ void drawFriendsDirectoryPage() {
 
 void drawFriendDiscoverablePage() {
   paintPageBackdrop();
-  drawCentered("DISCOVERABLE", 18, 3, COLOR_MINT);
-  drawCentered("MY SIGNAL // 2 OF 3", 51, 1, COLOR_CYAN);
-  drawPanelGlow(36, 91, 296, 240, 28,
+  drawCentered("DISCOVERABLE", 19, 3, COLOR_MINT);
+  drawCentered("MY SIGNAL // 2 OF 3", 55, 1, COLOR_CYAN);
+  drawPanelGlow(47, 98, 386, 257, 28,
                 friendDiscoverable ? COLOR_MINT : COLOR_PURPLE);
-  display->fillRoundRect(36, 91, 296, 240, 28, COLOR_CARD);
-  display->drawRoundRect(43, 98, 282, 226, 22,
+  display->fillRoundRect(47, 98, 386, 257, 28, COLOR_CARD);
+  display->drawRoundRect(56, 105, 368, 242, 22,
                          friendDiscoverable ? COLOR_MINT : COLOR_PURPLE);
-  drawFriendsIcon(184, 151, friendDiscoverable ? COLOR_MINT : COLOR_MUTED);
+  drawFriendsIcon(240, 162, friendDiscoverable ? COLOR_MINT : COLOR_MUTED);
   drawCentered(friendDiscoverable ? "VISIBLE TO DIGIPETS" : "SIGNAL IS HIDDEN",
-               195, 2, friendDiscoverable ? COLOR_MINT : COLOR_TEXT);
+               209, 2, friendDiscoverable ? COLOR_MINT : COLOR_TEXT);
   drawCentered(friendDiscoverable ? "LOW DUTY // ABOUT 1 SEC" :
                                     "ENABLE WHEN YOU WANT TO PAIR",
-               229, 1, COLOR_MUTED);
-  drawCentered(battle.status().c_str(), 252, 1,
+               245, 1, COLOR_MUTED);
+  drawCentered(battle.status().c_str(), 270, 1,
                friendDiscoverable ? COLOR_CYAN : COLOR_MUTED);
-  display->fillRoundRect(70, 270, 228, 64, 17,
+  display->fillRoundRect(91, FRIENDS_DISCOVER_BTN_Y, 298, FRIENDS_DISCOVER_BTN_H, 17,
                          friendDiscoverable ? COLOR_DANGER : COLOR_MINT);
   drawCentered(friendDiscoverable ? "STOP DISCOVERY" : "DISCOVER ME",
-               292, 2, readableTextColor(friendDiscoverable ? COLOR_DANGER : COLOR_MINT));
+               313, 2, readableTextColor(friendDiscoverable ? COLOR_DANGER : COLOR_MINT));
   drawFriendsFooter(1);
 }
 
 void drawFriendsNearbyPage() {
   paintPageBackdrop();
-  drawCentered("NEARBY", 18, 3, COLOR_MINT);
-  drawCentered("DIGIPET RADAR // 3 OF 3", 51, 1, COLOR_CYAN);
-  constexpr int16_t cx = 184, cy = 188;
+  drawCentered("NEARBY", 19, 3, COLOR_MINT);
+  drawCentered("DIGIPET RADAR // 3 OF 3", 55, 1, COLOR_CYAN);
+  constexpr int16_t cx = UI_CENTER_X, cy = 201;
   for (uint8_t ring = 1; ring <= 3; ++ring) display->drawCircle(cx, cy, ring * 38, COLOR_MUTED);
   display->drawLine(cx - 118, cy, cx + 118, cy, COLOR_MUTED);
   display->drawLine(cx, cy - 118, cx, cy + 118, COLOR_MUTED);
@@ -1819,9 +1825,9 @@ void drawFriendsNearbyPage() {
   snprintf(countText, sizeof(countText), "%u SIGNALS // %s",
            static_cast<unsigned>(results.size()),
            results.empty() ? "SCAN TO SEARCH" : "RSSI RANGE");
-  drawCentered(countText, 286, 1, COLOR_TEXT);
-  drawBattleButton(18, 306, 154, 64, 16, COLOR_PURPLE, ICON_DEFEND, "SCAN");
-  drawBattleButton(190, 306, 154, 64, 16,
+  drawCentered(countText, 306, 1, COLOR_TEXT);
+  drawBattleButton(23, FRIENDS_NEARBY_BTN_Y, 201, FRIENDS_NEARBY_BTN_H, 16, COLOR_PURPLE, ICON_DEFEND, "SCAN");
+  drawBattleButton(248, FRIENDS_NEARBY_BTN_Y, 201, FRIENDS_NEARBY_BTN_H, 16,
                    results.empty() ? COLOR_MUTED : COLOR_CYAN,
                    ICON_SPECIAL, "PAIR BEST");
   drawFriendsFooter(2);
@@ -1858,33 +1864,33 @@ void drawItemIcon(uint8_t item, int16_t cx, int16_t cy, uint16_t color) {
 // grid; the BACK button's off drawSettingsBack()'s own fixed rect.
 void drawItemsPage() {
   paintPageBackdrop();
-  drawCentered("ITEMS", 18, 3, COLOR_MINT);
-  drawCentered("MUTATION TRIGGERS FOUND VIA SCAN", 51, 1, COLOR_CYAN);
+  drawCentered("ITEMS", 19, 3, COLOR_MINT);
+  drawCentered("MUTATION TRIGGERS FOUND VIA SCAN", 55, 1, COLOR_CYAN);
 
   static const char *names[] = {"HP BOOST", "ATK BOOST", "DEF BOOST", "SPECIAL BOOST",
                                 "TYPE SHIFT"};
-  constexpr int16_t kFirstRowY = 76;
-  constexpr int16_t kRowHeight = 52;
+  constexpr int16_t kFirstRowY = ITEMS_ROW_Y0;
+  constexpr int16_t kRowHeight = ITEMS_ROW_PITCH;
   for (uint8_t i = 0; i < kItemTypeCount; ++i) {
     const int16_t y = kFirstRowY + i * kRowHeight;
     const bool available = inventory.counts[i] > 0;
     const uint16_t accent = i & 1 ? COLOR_PURPLE : COLOR_CYAN;
     const uint16_t fill = available ? COLOR_CARD : scaleRgb565(COLOR_CARD, 55);
-    display->fillRoundRect(20, y, 328, 46, 14, fill);
-    display->drawRoundRect(20, y, 328, 46, 14, available ? accent : COLOR_MUTED);
-    drawItemIcon(i, 46, y + 23, available ? accent : COLOR_MUTED);
+    display->fillRoundRect(26, y, 428, 49, 14, fill);
+    display->drawRoundRect(26, y, 428, 49, 14, available ? accent : COLOR_MUTED);
+    drawItemIcon(i, 60, y + 25, available ? accent : COLOR_MUTED);
 
     // Name is size 2 (was 1) -- the row's actual title, same "title" role
     // drawActionTile()'s own label plays; description stays size 1 as its
     // subtitle. "SPECIAL BOOST", the longest name, is 156px at size 2 and
-    // fits in the ~194px gap before the count column at x=268.
+    // fits in the gap before the count column.
     display->setTextSize(2);
     display->setTextColor(available ? COLOR_TEXT : COLOR_MUTED);
-    display->setCursor(74, y + 8);
+    display->setCursor(97, y + 9);
     display->print(names[i]);
     display->setTextSize(1);
     display->setTextColor(COLOR_MUTED);
-    display->setCursor(74, y + 32);
+    display->setCursor(97, y + 34);
     if (i == ITEM_TYPE_SHIFT) {
       display->print("REROLLS ELEMENT");
     } else {
@@ -1896,7 +1902,7 @@ void drawItemsPage() {
 
     char countText[6];
     snprintf(countText, sizeof(countText), "x%u", inventory.counts[i]);
-    drawCenteredInRect(countText, 268, y, 66, 46, 2, available ? COLOR_MINT : COLOR_MUTED);
+    drawCenteredInRect(countText, 350, y, 86, 49, 2, available ? COLOR_MINT : COLOR_MUTED);
   }
 
   drawSettingsBack();

@@ -245,8 +245,8 @@ float bootSmoothstep(float from, float to, float value);
 // position, reused by playEvolutionAnimation() (main.cpp) for the evolved
 // creature's portrait.
 constexpr int16_t BOOT_CX = UI_WIDTH / 2;
-constexpr int16_t BOOT_TOP_Y = 122;
-constexpr int16_t BOOT_BOTTOM_Y = 316;
+constexpr int16_t BOOT_TOP_Y = 131;
+constexpr int16_t BOOT_BOTTOM_Y = 339;
 constexpr int16_t BOOT_CORE_Y = (BOOT_TOP_Y + BOOT_BOTTOM_Y) / 2;
 constexpr uint8_t BOOT_NODE_COUNT = 16;
 

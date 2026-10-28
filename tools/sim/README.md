@@ -50,7 +50,7 @@ tools/sim/render.sh genome-data /tmp/genome-data.png      #  ...genome-code/EXPO
 tools/sim/render.sh battle-fight /tmp/fight_amber.png 2 amber-core
 ```
 
-Output is a real PNG at the panel's native 368x448, pixel-accurate RGB565
+Output is a real PNG at the panel's native 480x480, pixel-accurate RGB565
 (same 16-bit color the panel actually gets sent -- not the AMOLED's own
 color reproduction, which this can't capture).
 
