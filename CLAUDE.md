@@ -13,6 +13,8 @@ This file is the working brief for Claude Code. Read it fully before changing an
 3. Customize pet behavior (stats, evolution, events, day-to-day helper features).
 4. Out of scope for now: the 3D-printed case, final battery sizing.
 
+**Single target board (decided 2026-10-28):** this fork supports **only the Waveshare ESP32-S3-Touch-AMOLED-2.16**. Compatibility with Digipet's original 1.8" board is **not** a goal. Don't keep `#ifdef` paths, envs, pins or drivers for both boards; replace 1.8"-specific code with 2.16" code and delete what is left over. Upstream Digipet code is a starting point to adapt, not something to stay compatible with.
+
 **Working style requested:** small verifiable steps. After each step the firmware must compile (`pio run`). Commit after each working step.
 
 ---
@@ -45,10 +47,10 @@ Source2: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16
 - Official demo repo: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16
 
 ### Key porting insight
-The 1.8" board Digipet targets also uses a **CO5300-class QSPI AMOLED**. So Digipet's display driver path is the closest match. Expect differences in:
-- resolution (368×448 → 480×480, so layout/scaling code changes),
-- touch controller (FT3168 → **CST9220**),
-- pin map and possibly the power/IO setup.
+The 1.8" board Digipet was written for also uses a **CO5300-class QSPI AMOLED**, so Digipet's display driver works here as is (verified identical to Waveshare's 2.16" copy). Everything else gets **replaced** for the 2.16", not kept alongside it:
+- resolution 368×448 → **480×480** (layout/scaling code changes),
+- touch CST816x (Arduino_DriveBus) → **CST9220** (SensorLib),
+- pin map, no I/O expander (the 1.8" XCA9554 code goes away), SD over SPI instead of SD_MMC.
 
 `TFT_eSPI` does **not** support QSPI AMOLED. Keep Digipet's display stack (vendored Waveshare CO5300 QSPI driver); if a new driver is needed, use `Arduino_GFX` or Espressif's `esp_lcd` components.
 
@@ -66,7 +68,7 @@ Why Digipet:
 
 Known caveats:
 - 0 stars/forks, so it is lightly tested by others; expect bugs unrelated to our port.
-- It supports only the 1.8" V2 board. Do not assume its pins, touch chip or power setup match ours.
+- It was written only for the 1.8" V2 board. Do not assume its pins, touch chip or power setup match ours, and do not preserve 1.8" support while porting.
 - No case files and no custom PCB (not needed).
 
 Other projects (TamaFi, Catode32, Pixel Pets) are **reference only** for ideas; do not port their code. Check a repo's license before borrowing anything.
@@ -97,6 +99,7 @@ Other projects (TamaFi, Catode32, Pixel Pets) are **reference only** for ideas; 
 - [ ] Init IMU (QMI8658), RTC (PCF85063), buttons (GPIO18, BOOT). (Compiles, plus PWR sensed on GPIO16; device check in `docs/DEVICE_TESTS.md`.)
 
 ### Phase 2 — Port the pet app
+- [ ] Make `[env:waveshare_amoled_216]` build the pet app instead of only the bring-up firmware, and **remove the 1.8" target**: the `waveshare_amoled_v2` env, `src/pin_config.h`, the XCA9554 expander code and lib, the CST816x touch path, and SD_MMC. Keep the bring-up firmware available (e.g. its own `waveshare_amoled_216_bringup` env) as a hardware test.
 - [ ] Replace/adjust the display layer so the pet UI renders at 480×480 (scale sprites or redesign layout; keep UI sizes in constants).
 - [ ] Map the base repo's input to touch + buttons on this board.
 - [ ] Port save/load (flash or SD) and the timekeeping (use the RTC for time between boots).
@@ -131,9 +134,10 @@ Fill in the desired behavior here (edit this list as ideas come):
 2. Keep board-specific code behind the board config header and a thin HAL; game logic must not touch hardware directly.
 3. One logical change per commit, with a message saying what was tested on device vs. only compiled.
 4. Keep the project compiling after every step. Run `pio run` before reporting done.
-5. Note anything that can only be verified on the physical device in `docs/DEVICE_TESTS.md` as a checklist for me to run.
+5. Note anything that can only be verified on the physical device in `docs/DEVICE_TESTS.md` (detailed steps) and add a line for it to `docs/PENDING_TESTS.md` (the list of everything waiting for the board). I don't have the board yet, so all hardware work is compile-only until it arrives; say so in commit messages.
 6. Don't add large dependencies without telling me why.
 7. Respect the base repo's license; keep attribution and the original LICENSE file in the fork.
+8. Only the 2.16" board is supported. No dual-board `#ifdef`s or 1.8" fallbacks; remove 1.8"-only code when its replacement lands.
 
 ---
 
@@ -143,7 +147,8 @@ Fill in the desired behavior here (edit this list as ideas come):
 - Pin maps, I/O expander usage and touch init sequence for this exact board must come from Waveshare resources.
 - 480×480 is a bigger frame than the base UI was designed for; RAM use and refresh speed need checking.
 - AMOLED burn-in: avoid static bright UI.
-- Don't mix this board's code with the 1.8" board's code assuming they are identical; they differ in touch chip and pins.
+- Inherited Digipet code still assumes the 1.8" board (pins, touch chip, expander, SD_MMC, 368×448 coordinates). Treat every hardware assumption in it as wrong for the 2.16" until checked against `include/board_amoled_216.h`.
+- No board on hand yet: hardware code can only be compiled, so mistakes surface late. Keep hardware facts in the board header so fixes stay one-line.
 
 ---
 
