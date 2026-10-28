@@ -26,3 +26,15 @@ Only non-code files (examples, `keywords.txt`, `gen_keywords.pl`,
 Download the Waveshare repo and the upstream tags into a scratch directory
 and run `diff -rq --strip-trailing-cr <upstream> lib/<name>`. Update this file
 whenever a library is replaced or patched.
+
+## Registry libraries for the AMOLED-2.16 env
+
+`[env:waveshare_amoled_216]` takes these from the PlatformIO registry instead
+of vendoring them, pinned to the versions Waveshare's
+[ESP32-S3-Touch-AMOLED-2.16](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16)
+demo ships in `examples/arduino/libraries/` (checked at commit `225a62b`):
+
+| Library | Version | Against the Waveshare copy |
+|---|---|---|
+| `lewisxhe/SensorLib` (MIT) | 0.3.3 | Identical `src/` (ignoring line endings) |
+| `lewisxhe/XPowersLib` (MIT) | 0.2.6 | Waveshare fixes the spelling of a few method names in the AXP192/AXP202/AXP2101 drivers (`eanblePowerOffDelay` -> `enablePowerOffDelay`, `...PowerDowm` -> `...PowerDown`, and others). No behaviour changes. Use the registry spellings. |

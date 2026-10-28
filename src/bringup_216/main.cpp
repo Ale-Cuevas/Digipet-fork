@@ -10,6 +10,7 @@
 
 #include "board_amoled_216.h"  // before XPowersLib: it selects the PMIC driver
 #include <XPowersLib.h>
+#include <TouchDrvCSTXXX.hpp>
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
     BOARD_LCD_CS, BOARD_LCD_SCLK, BOARD_LCD_SDIO0, BOARD_LCD_SDIO1, BOARD_LCD_SDIO2, BOARD_LCD_SDIO3);
@@ -18,8 +19,11 @@ Arduino_CO5300 *panel = new Arduino_CO5300(
     BOARD_LCD_COL_OFFSET, BOARD_LCD_ROW_OFFSET, BOARD_LCD_COL_OFFSET, BOARD_LCD_ROW_OFFSET);
 
 XPowersPMU pmu;
+TouchDrvCST92xx touch;
 bool pmuOk = false;
 bool displayOk = false;
+bool touchOk = false;
+volatile bool touchPending = false;
 
 const uint8_t BRINGUP_BRIGHTNESS = 160;
 const uint32_t STATUS_INTERVAL_MS = 2000;
@@ -58,6 +62,43 @@ void initDisplay() {
   Serial.printf("[lcd] CO5300 ok, %dx%d\n", panel->width(), panel->height());
 }
 
+void IRAM_ATTR onTouchInterrupt() {
+  touchPending = true;
+}
+
+void initTouch() {
+  touch.setPins(BOARD_TP_RST, BOARD_TP_INT);
+  touchOk = touch.begin(Wire, BOARD_I2C_ADDR_TOUCH, BOARD_I2C_SDA, BOARD_I2C_SCL);
+  if (!touchOk) {
+    Serial.println("[touch] CST92xx not found");
+    return;
+  }
+  touch.setMaxCoordinates(BOARD_LCD_WIDTH, BOARD_LCD_HEIGHT);
+  touch.setSwapXY(BOARD_TP_SWAP_XY);
+  touch.setMirrorXY(BOARD_TP_MIRROR_X, BOARD_TP_MIRROR_Y);
+  pinMode(BOARD_TP_INT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BOARD_TP_INT), onTouchInterrupt, FALLING);
+  Serial.printf("[touch] %s ok, %u points\n", touch.getModelName(), touch.getSupportTouchPoint());
+}
+
+// Logs each touch and leaves a dot on screen, so the mapping can be checked
+// against the corner markers.
+void pollTouch() {
+  if (!touchOk) return;
+  noInterrupts();
+  const bool pending = touchPending;
+  touchPending = false;
+  interrupts();
+  if (!pending) return;
+
+  int16_t x[2], y[2];
+  const uint8_t points = touch.getPoint(x, y, touch.getSupportTouchPoint());
+  for (uint8_t i = 0; i < points; i++) {
+    Serial.printf("[touch] #%u x=%d y=%d\n", i, x[i], y[i]);
+    if (displayOk) panel->fillCircle(x[i], y[i], 4, i == 0 ? RGB565_CYAN : RGB565_MAGENTA);
+  }
+}
+
 // One full-screen fill per primary so a wrong color order or offset is
 // obvious, then corner markers to check orientation and edge clipping.
 void drawTestScreen() {
@@ -86,6 +127,8 @@ void drawTestScreen() {
   panel->println("AMOLED 2.16 bring-up");
   panel->setCursor(m + 8, m + 68);
   panel->printf("PMIC: %s", pmuOk ? "ok" : "MISSING");
+  panel->setCursor(m + 8, m + 92);
+  panel->printf("Touch: %s", touchOk ? "ok, draw here" : "MISSING");
 }
 
 void setup() {
@@ -96,6 +139,7 @@ void setup() {
   Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
   initPmu();
   initDisplay();
+  initTouch();
   if (displayOk) drawTestScreen();
 }
 
@@ -105,5 +149,6 @@ void loop() {
     lastStatus = millis();
     logPmu();
   }
+  pollTouch();
   delay(10);
 }

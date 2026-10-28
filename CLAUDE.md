@@ -93,7 +93,7 @@ Other projects (TamaFi, Catode32, Pixel Pets) are **reference only** for ideas; 
 - [x] Create a board config header (`include/board_amoled_216.h`) holding **all** pin numbers and screen size constants. No magic numbers elsewhere.
 - [x] Get pins from Waveshare's official demo code or schematic. **Ask me if anything is ambiguous; do not invent pin numbers.** (Each value in the header is tagged with its source.)
 - [ ] Minimal "hello" firmware: init power chip (AXP2101), init display, fill screen with color, print text. Verify on the device. (Compiles; device check in `docs/DEVICE_TESTS.md`.)
-- [ ] Init touch (CST9220) and print coordinates to serial.
+- [ ] Init touch (CST9220) and print coordinates to serial. (Compiles; device check in `docs/DEVICE_TESTS.md`.)
 - [ ] Init IMU (QMI8658), RTC (PCF85063), buttons (GPIO18, BOOT).
 
 ### Phase 2 — Port the pet app
