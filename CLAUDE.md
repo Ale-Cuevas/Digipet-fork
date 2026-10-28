@@ -20,6 +20,7 @@ This file is the working brief for Claude Code. Read it fully before changing an
 ## 2. Target hardware (from Waveshare docs)
 
 Source: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16
+Source2: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16
 
 | Item | Spec |
 |---|---|
@@ -37,11 +38,11 @@ Source: https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16
 | USB | USB-C (flashing, logs) |
 | Dimensions | Not in the text docs; check the dimensions diagram on the Waveshare page |
 
-**Not yet verified (get from the Waveshare "Resources" / schematic / demo code, do not guess):**
-- Exact GPIO pin numbers for QSPI display, touch I2C, IMU I2C, audio I2S, expander lines.
-- Whether some signals (touch reset, display reset, SD CS) go through an I/O expander.
+**Resolved from the demo repo and schematic (2026-10-28):** all GPIOs and I2C addresses are in `include/board_amoled_216.h`, each tagged with its source. There is **no I/O expander** on this board; display reset (GPIO39), touch reset (GPIO40) and SD CS (GPIO41) are plain GPIOs. Note the CLAUDE.md table's touch/display pins differ from the 1.8" board (LCD SCLK 38, TP_INT 11, I2S MCLK 42).
+
+**Still open:**
 - Recommended battery size and board outline.
-- Official demo repo: look under https://github.com/waveshareteam (find the one for this board).
+- Official demo repo: https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-2.16
 
 ### Key porting insight
 The 1.8" board Digipet targets also uses a **CO5300-class QSPI AMOLED**. So Digipet's display driver path is the closest match. Expect differences in:
@@ -88,10 +89,10 @@ Other projects (TamaFi, Catode32, Pixel Pets) are **reference only** for ideas; 
 - [x] Confirm the project builds unchanged (`pio run`) for its original board. (2026-10-28: `waveshare_amoled_v2` builds, RAM 20.3%, flash 46.5%; `pio test -e native` 82/82 pass.)
 
 ### Phase 1 — Bring up the new board (hardware abstraction)
-- [ ] Add a new PlatformIO env, e.g. `[env:waveshare_amoled_216]`, with build flags `-DBOARD_AMOLED_216`.
-- [ ] Create a board config header (`include/board_amoled_216.h`) holding **all** pin numbers and screen size constants. No magic numbers elsewhere.
-- [ ] Get pins from Waveshare's official demo code or schematic. **Ask me if anything is ambiguous; do not invent pin numbers.**
-- [ ] Minimal "hello" firmware: init power chip (AXP2101), init display, fill screen with color, print text. Verify on the device.
+- [x] Add a new PlatformIO env, e.g. `[env:waveshare_amoled_216]`, with build flags `-DBOARD_AMOLED_216`. (Builds the bring-up firmware in `src/bringup_216/` for now.)
+- [x] Create a board config header (`include/board_amoled_216.h`) holding **all** pin numbers and screen size constants. No magic numbers elsewhere.
+- [x] Get pins from Waveshare's official demo code or schematic. **Ask me if anything is ambiguous; do not invent pin numbers.** (Each value in the header is tagged with its source.)
+- [ ] Minimal "hello" firmware: init power chip (AXP2101), init display, fill screen with color, print text. Verify on the device. (Compiles; device check in `docs/DEVICE_TESTS.md`.)
 - [ ] Init touch (CST9220) and print coordinates to serial.
 - [ ] Init IMU (QMI8658), RTC (PCF85063), buttons (GPIO18, BOOT).
 
