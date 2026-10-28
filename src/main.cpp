@@ -2544,7 +2544,7 @@ void loop() {
                               UI_TILE_H, UI_TILE_RADIUS);
       } else if (currentPage == PAGE_BATTLE &&
                  battle.state() == FamiliarBattleState::Idle &&
-                 battleShowingActions && tile >= 0) {
+                 battleShowingActions && !showingBattleResults && tile >= 0) {
         flashPressedHighlight(UI_TILE_X[tile % 2], UI_TILE_Y[tile / 2], UI_TILE_W,
                               UI_TILE_H, UI_TILE_RADIUS);
       } else if (currentPage == PAGE_BATTLE &&

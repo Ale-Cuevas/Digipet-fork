@@ -1344,7 +1344,9 @@ void gameHandleTap(Page page, int16_t x, int16_t y, int16_t dx, int16_t dy,
     }
     drawHome();
   } else if (page == PAGE_BATTLE && battle.state() == FamiliarBattleState::Idle &&
-             battleShowingActions) {
+             battleShowingActions && !showingBattleResults) {
+    // FIND's opponent picker is drawn over the grid while the grid is still
+    // the active view, so its taps go to handleBattleTap() below instead.
     handleBattleGridTap(x, y);
   } else if (page == PAGE_BATTLE) {
     handleBattleTap(x, y);

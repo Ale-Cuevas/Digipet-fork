@@ -116,7 +116,7 @@ without catching them live. `POWERLOG` prints the power event log.
 
 ### Wi-Fi and BLE
 - [ ] Status > FEED runs the Wi-Fi + BLE scan and finds nearby networks/devices; Recon Log lists them.
-- [ ] With a second Digipet (or `share/vpet-battle/vpet_battle_simulator.py`): HOST on one, FIND on the other, pick it from the opponent list, play a battle through to BATTLE COMPLETE. Move buttons respond to taps and flash when pressed.
+- [ ] With a second Digipet (or `share/vpet-battle/vpet_battle_simulator.py`): HOST on one, FIND on the other, pick it from the opponent list, play a battle through to BATTLE COMPLETE. Tapping a row in the list connects to that opponent (it used to rescan or open FRIENDS; fixed and checked in the simulator), and pressing a row doesn't flash a grid-tile outline. Move buttons respond to taps and flash when pressed.
 - [ ] Friends: DISCOVER ME on one device, SCAN / PAIR BEST on the other: "FRIEND ADDED" appears and the friend shows in the directory.
 
 ### OTA
