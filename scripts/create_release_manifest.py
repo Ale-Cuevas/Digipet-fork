@@ -26,7 +26,7 @@ def main() -> None:
     manifest: dict[str, object] = {
         "schema": 1,
         "product": "digipet",
-        "target": "waveshare-esp32-s3-touch-amoled-1.8-v2",
+        "target": "waveshare-esp32-s3-touch-amoled-2.16",
         "version": version,
         "firmware": {
             "filename": "digipet-firmware.bin",

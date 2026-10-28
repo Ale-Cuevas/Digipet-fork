@@ -3,7 +3,7 @@
 
 #include <Arduino_GFX_Library.h>
 #include <Preferences.h>
-#include <SD_MMC.h>
+#include <SD.h>
 #include <WiFi.h>
 #include <cstring>
 #include <esp_system.h>
@@ -431,8 +431,8 @@ bool exportActiveGenome() {
     strcpy(genomeTransferStatus, "SD CARD NOT READY");
     return false;
   }
-  SD_MMC.mkdir("/digipet");
-  File file = SD_MMC.open("/digipet/genome.txt", FILE_WRITE);
+  SD.mkdir("/digipet");
+  File file = SD.open("/digipet/genome.txt", FILE_WRITE);
   char code[PET_GENOME_CODE_LENGTH + 1]{};
   const bool encoded = encodePetGenome(pet.genome, code, sizeof(code));
   const bool written = file && encoded && file.println(code) > 0;
@@ -447,7 +447,7 @@ bool importCopiedGenome() {
     strcpy(genomeTransferStatus, "SD CARD NOT READY");
     return false;
   }
-  File file = SD_MMC.open("/digipet/genome.txt", FILE_READ);
+  File file = SD.open("/digipet/genome.txt", FILE_READ);
   String code;
   while (file && file.available() && !code.length()) {
     String line = file.readStringUntil('\n');
@@ -494,7 +494,7 @@ void presentScanningPage(uint8_t phase) {
     display = &pageCanvasA;
     drawScanningPage(phase);
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   } else {
     drawScanningPage(phase);
   }
@@ -565,7 +565,7 @@ void playEvolutionAnimation() {
   const PetPalette palette = paletteForGenome(pet.genome);
   Arduino_GFX *previousDisplay = display;
   paintBootBackdrop(palette);
-  const size_t frameBytes = static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t);
+  const size_t frameBytes = static_cast<size_t>(UI_WIDTH) * UI_HEIGHT * sizeof(uint16_t);
 
   // Phase 1: a converging energy burst at the core, echoing the boot
   // sequence's helix-converge finale. Held past drawBootCore's own 0.55
@@ -583,7 +583,7 @@ void playEvolutionAnimation() {
     drawCentered("DATA EVOLUTION", 60, 3,
                 lerpRgb565(COLOR_BACKGROUND, COLOR_TEXT, bootSmoothstep(0.0f, 0.3f, progress)));
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
     if (progress >= 1.0f) break;
     delay(18);
   }
@@ -606,7 +606,7 @@ void playEvolutionAnimation() {
     drawCentered(STAGE_NAMES[pet.stage], 330, 3,
                 lerpRgb565(COLOR_BACKGROUND, COLOR_MINT, eased));
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
     if (progress >= 1.0f) break;
     delay(18);
   }
@@ -1018,7 +1018,7 @@ void handleBattleTap(int16_t x, int16_t y) {
         drawCentered("ESTABLISHING LINK", 296, 1, COLOR_MUTED);
         if (transitionsReady) {
           display = previousDisplay;
-          panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+          panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
         }
         battle.connectTo(index);
         presentBattlePage();
@@ -1036,7 +1036,7 @@ void handleBattleTap(int16_t x, int16_t y) {
     // midpoint, rows split at the gap between the two button rows. Row
     // index doubled gives [ATK,DEF]/[SPEC,FLEE] = FamiliarBattleMove's own
     // Attack=0/Defend=1/Special=2/Flee=3 ordering directly.
-    const uint8_t col = x < LCD_WIDTH / 2 ? 0 : 1;
+    const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
     const uint8_t row = y < 329 ? 0 : 1;
     const uint8_t move = row * 2 + col;
     if (move == static_cast<uint8_t>(FamiliarBattleMove::Flee)) {
@@ -1060,7 +1060,7 @@ void handleBattleTap(int16_t x, int16_t y) {
       presentBattlePage();
     }
   } else if (state == FamiliarBattleState::Result) {
-    if (battle.opponentGenomeCodeAvailable() && y >= 292 && x < LCD_WIDTH / 2) {
+    if (battle.opponentGenomeCodeAvailable() && y >= 292 && x < UI_WIDTH / 2) {
       PetGenome received{};
       if (decodePetGenome(battle.opponentGenomeCode(), received)) {
         saveCopiedGenome(received);
@@ -1089,7 +1089,7 @@ void handleBattleTap(int16_t x, int16_t y) {
 // has with the Status action grid.
 void handleBattleGridTap(int16_t x, int16_t y) {
   if (y < 78 || y >= 364) return;
-  const uint8_t column = x >= LCD_WIDTH / 2;
+  const uint8_t column = x >= UI_WIDTH / 2;
   const uint8_t row = y >= 227;
   const auto tile = static_cast<BattleGridTile>(row * 2 + column);
   if (tile == GRID_RIVALS) {
@@ -1128,7 +1128,7 @@ void handleBattleGridTap(int16_t x, int16_t y) {
     drawCentered("4 SECOND SEARCH", 296, 1, COLOR_MUTED);
     if (transitionsReady) {
       display = previousDisplay;
-      panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+      panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
     }
     recordPowerEvent(PowerEvent::BleScanStart);
     battle.beginFind(battlePlayerId(), pet.stage, 5, capabilities, genomeCode);
@@ -1153,7 +1153,7 @@ void presentFriendsPage() {
     display = &pageCanvasA;
     drawFriendsPage();
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   } else {
     drawFriendsPage();
   }
@@ -1196,7 +1196,7 @@ void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy) {
   }
   if (friendsPage == 2 && y >= 306 && y < 370) {
     const FamiliarBattleCapabilities capabilities = battleCapabilities();
-    if (x < LCD_WIDTH / 2) {
+    if (x < UI_WIDTH / 2) {
       friendDiscoverable = false;
       Arduino_GFX *previousDisplay = display;
       if (transitionsReady) display = &pageCanvasA;
@@ -1205,7 +1205,7 @@ void handleFriendsTap(int16_t x, int16_t y, int16_t dx, int16_t dy) {
       drawCentered("DIGIPET SIGNATURES ONLY", 224, 1, COLOR_MUTED);
       if (transitionsReady) {
         display = previousDisplay;
-        panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+        panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
       }
       recordPowerEvent(PowerEvent::BleScanStart);
       battle.beginFind(battlePlayerId(), pet.stage, 5, capabilities, nullptr,
@@ -1232,7 +1232,7 @@ void presentItemsPage() {
     display = &pageCanvasA;
     drawItemsPage();
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   } else {
     drawItemsPage();
   }
@@ -1266,7 +1266,7 @@ void handleItemsTap(int16_t x, int16_t y) {
 // here, not two, so no settingsGridPage-style page offset is needed.
 void handleStatusGridTap(int16_t x, int16_t y) {
   if (y < 78 || y >= 364) return;
-  const uint8_t column = x >= LCD_WIDTH / 2;
+  const uint8_t column = x >= UI_WIDTH / 2;
   const uint8_t row = y >= 227;
   const uint8_t tile = statusActionsPage * 4 + row * 2 + column;
   if (tile == 3) {
@@ -1483,7 +1483,7 @@ void gameOverlayTouch(int16_t x, int16_t y, int16_t dx, int16_t dy, bool release
         transitionGenomeProfileView(false);
       }
     } else if (genomeProfileShowingData && y >= 270 && y < 316) {
-      if (x < LCD_WIDTH / 2) exportActiveGenome();
+      if (x < UI_WIDTH / 2) exportActiveGenome();
       else importCopiedGenome();
       presentGenomeProfilePage();
     } else if ((genomeProfileShowingData && y >= 393) ||

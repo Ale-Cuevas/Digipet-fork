@@ -44,7 +44,7 @@ void drawCentered(const char *text, int16_t y, uint8_t size, uint16_t color) {
   uint16_t w, h;
   display->setTextSize(size);
   display->getTextBounds(text, 0, y, &x1, &y1, &w, &h);
-  display->setCursor((LCD_WIDTH - w) / 2, y);
+  display->setCursor((UI_WIDTH - w) / 2, y);
   display->setTextColor(color);
   display->print(text);
 }
@@ -61,13 +61,13 @@ void drawCentered(const char *text, int16_t y, uint8_t size, uint16_t color) {
 uint16_t backdropColorAt(int16_t y) {
   const uint16_t horizon = lerpRgb565(COLOR_BACKGROUND, COLOR_CARD, 0.4f);
   return lerpRgb565(COLOR_BACKGROUND, horizon,
-                    static_cast<float>(y) / (LCD_HEIGHT - 1));
+                    static_cast<float>(y) / (UI_HEIGHT - 1));
 }
 
 
 void paintPageBackdrop() {
-  for (int16_t y = 0; y < LCD_HEIGHT; ++y) {
-    display->drawFastHLine(0, y, LCD_WIDTH, backdropColorAt(y));
+  for (int16_t y = 0; y < UI_HEIGHT; ++y) {
+    display->drawFastHLine(0, y, UI_WIDTH, backdropColorAt(y));
   }
 }
 

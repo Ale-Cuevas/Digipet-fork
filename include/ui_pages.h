@@ -9,7 +9,7 @@
 #include "familiar_battle_service.h"
 #include "game/vpet/pet_genome.h"
 #include "game/vpet/vpet_state.h"
-#include "pin_config.h"
+#include "ui_layout.h"
 
 // The Companion/Status page renderers and their shared drawing helpers,
 // factored out of main.cpp so they can be linked into something other than
@@ -244,7 +244,7 @@ float bootSmoothstep(float from, float to, float value);
 // Same reasoning as bootSmoothstep: the boot sequence's on-screen "core"
 // position, reused by playEvolutionAnimation() (main.cpp) for the evolved
 // creature's portrait.
-constexpr int16_t BOOT_CX = LCD_WIDTH / 2;
+constexpr int16_t BOOT_CX = UI_WIDTH / 2;
 constexpr int16_t BOOT_TOP_Y = 122;
 constexpr int16_t BOOT_BOTTOM_Y = 316;
 constexpr int16_t BOOT_CORE_Y = (BOOT_TOP_Y + BOOT_BOTTOM_Y) / 2;

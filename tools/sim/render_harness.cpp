@@ -106,9 +106,9 @@ PetGenome opponentTestGenome() {
 bool writePpm(Arduino_Canvas &canvas, const char *path) {
   FILE *f = fopen(path, "wb");
   if (!f) return false;
-  fprintf(f, "P6\n%d %d\n255\n", LCD_WIDTH, LCD_HEIGHT);
+  fprintf(f, "P6\n%d %d\n255\n", UI_WIDTH, UI_HEIGHT);
   const uint16_t *fb = canvas.getFramebuffer();
-  for (int i = 0; i < LCD_WIDTH * LCD_HEIGHT; ++i) {
+  for (int i = 0; i < UI_WIDTH * UI_HEIGHT; ++i) {
     const uint16_t px = fb[i];
     fputc(((px >> 11) & 0x1F) * 255 / 31, f);
     fputc(((px >> 5) & 0x3F) * 255 / 63, f);
@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
   const char *outPath = argv[2];
   const uint8_t stage = argc > 3 ? static_cast<uint8_t>(atoi(argv[3])) : 2;
 
-  Arduino_Canvas canvas(LCD_WIDTH, LCD_HEIGHT, nullptr);
+  Arduino_Canvas canvas(UI_WIDTH, UI_HEIGHT, nullptr);
   canvas.begin();
   display = &canvas;
   seedTestSettings();

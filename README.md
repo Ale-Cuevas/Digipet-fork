@@ -12,8 +12,9 @@ cloud: just a touchscreen, a companion built from its own procedurally
 generated genome, and firmware written to make it feel like something is
 actually in there.
 
-It targets the Waveshare ESP32-S3 Touch AMOLED 1.8 inch board (V2: CO5300
-display, CST820 touch). The presentation takes cues from Digivice-era
+This fork targets the Waveshare ESP32-S3-Touch-AMOLED-2.16 board (480x480
+CO5300 display, CST9220 touch). Upstream Digipet was written for the 1.8"
+board; that board is not supported here. The presentation takes cues from Digivice-era
 hardware pets, but every creature, egg, and animation here is generated at
 runtime. No Digimon artwork, no proprietary assets, nothing borrowed.
 
@@ -42,16 +43,15 @@ Poop and illness mechanics are intentionally excluded.
 
 ## Hardware
 
-This firmware targets the V2 board:
-
 ```text
-Waveshare ESP32-S3-Touch-AMOLED-1.8
-Display: CO5300, 368 x 448
-Touch:   CST820/CST816-compatible controller
+Waveshare ESP32-S3-Touch-AMOLED-2.16
+Display: CO5300 over QSPI, 480 x 480
+Touch:   CST9220
+PMIC:    AXP2101
 MCU:     ESP32-S3 with 8 MB PSRAM and 16 MB flash
 ```
 
-It is not intended for the visually similar V1 display variant.
+Every pin and I2C address is in `include/board_amoled_216.h`.
 
 ## Build and flash
 
@@ -59,15 +59,18 @@ Install [PlatformIO](https://platformio.org/), connect the board, then run:
 
 ```bash
 pio run
-pio run -t upload --upload-port /dev/ttyACM0
+pio run -e waveshare_amoled_216 -t upload --upload-port /dev/ttyACM0
 pio device monitor --port /dev/ttyACM0 --baud 115200
 ```
 
 Change the serial device where required for your operating system.
 
-The first build downloads NimBLE-Arduino. Board-specific display, touch, and
-bus libraries are vendored under `lib/` because this board requires Waveshare
-drivers that are not fully represented by the generic PlatformIO board target.
+`waveshare_amoled_216` is the pet firmware. `waveshare_amoled_216_bringup`
+is a standalone hardware test (display, touch, PMIC, IMU, RTC, buttons)
+that logs each chip to serial.
+
+The first build downloads NimBLE-Arduino, SensorLib and XPowersLib. The
+Waveshare CO5300 display driver is vendored under `lib/`.
 
 ## Optional Wi-Fi and time setup
 

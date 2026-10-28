@@ -107,7 +107,7 @@ inherently animated-over-time rather than one static frame. To extend:
    no logic changes.
 3. Add `extern` declarations for any newly-needed state to
    `include/ui_pages.h`, and function prototypes for anything moved.
-4. `pio run -e waveshare_amoled_v2` to confirm the firmware still builds
+4. `pio run -e waveshare_amoled_216` to confirm the firmware still builds
    (should be a near-zero size delta -- code moved, not changed).
 5. Define harness-side fakes for the new state in `render_harness.cpp`
    (or a fake object matching the real type's public interface, the way a

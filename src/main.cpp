@@ -2,7 +2,8 @@
 #include <Preferences.h>
 #include <Wire.h>
 #include <ESP_I2S.h>
-#include <SD_MMC.h>
+#include <SD.h>
+#include <SPI.h>
 #include <WiFi.h>
 #include <cstdarg>
 #include <time.h>
@@ -14,11 +15,13 @@
 #include <esp_system.h>
 #include <mbedtls/sha256.h>
 
-#include <Adafruit_XCA9554.h>
-#include <Arduino_DriveBus_Library.h>
 #include <Arduino_GFX_Library.h>
 
-#include "pin_config.h"
+#include "board_amoled_216.h"  // before XPowersLib: it selects the PMIC driver
+#include <XPowersLib.h>
+#include <TouchDrvCSTXXX.hpp>
+
+#include "ui_layout.h"
 #include "power_telemetry.h"
 #include "familiar_battle_service.h"
 #include "game_module.h"
@@ -55,17 +58,18 @@ uint16_t COLOR_PURPLE = 0xA81F;
 const char *STAGE_NAMES[] = {"BIT EGG", "HATCHLING", "SCOUT", "GUARDIAN", "TITAN"};
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
-    LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
+    BOARD_LCD_CS, BOARD_LCD_SCLK, BOARD_LCD_SDIO0, BOARD_LCD_SDIO1, BOARD_LCD_SDIO2, BOARD_LCD_SDIO3);
+// The driver's column/row offsets place the UI window on the panel (see
+// ui_layout.h), so every draw and blit below works in UI coordinates.
 Arduino_CO5300 *panel = new Arduino_CO5300(
-    bus, GFX_NOT_DEFINED, 0, LCD_WIDTH, LCD_HEIGHT, 16, 0, 0, 0);
+    bus, BOARD_LCD_RESET, 0, UI_WIDTH, UI_HEIGHT,
+    BOARD_LCD_COL_OFFSET + UI_ORIGIN_X, BOARD_LCD_ROW_OFFSET + UI_ORIGIN_Y,
+    BOARD_LCD_COL_OFFSET + UI_ORIGIN_X, BOARD_LCD_ROW_OFFSET + UI_ORIGIN_Y);
 Arduino_GFX *display = panel;
-Arduino_Canvas pageCanvasA(LCD_WIDTH, LCD_HEIGHT, panel);
-Arduino_Canvas pageCanvasB(LCD_WIDTH, LCD_HEIGHT, panel);
+Arduino_Canvas pageCanvasA(UI_WIDTH, UI_HEIGHT, panel);
+Arduino_Canvas pageCanvasB(UI_WIDTH, UI_HEIGHT, panel);
 uint16_t *transitionFrame = nullptr;
 bool transitionsReady = false;
-
-std::shared_ptr<Arduino_IIC_DriveBus> i2cBus =
-    std::make_shared<Arduino_HWIIC>(IIC_SDA, IIC_SCL, &Wire);
 
 void touchInterrupt();
 void drawCentered(const char *text, int16_t y, uint8_t size, uint16_t color);
@@ -96,10 +100,13 @@ void loadFriendsList();
 void loadInventory();
 void loadCopiedGenome();
 void drawEvolutionDebugPage();
-std::unique_ptr<Arduino_IIC> touch(new Arduino_CST816x(
-    i2cBus, CST816T_DEVICE_ADDRESS, DRIVEBUS_DEFAULT_VALUE, TP_INT, touchInterrupt));
-
-Adafruit_XCA9554 expander;
+TouchDrvCST92xx touch;
+bool touchReady = false;
+volatile bool touchInterruptPending = false;
+XPowersPMU pmu;
+// The SD card has its own SPI bus. The display's QSPI bus already takes
+// SPI2 (FSPI), so the card goes on SPI3 (HSPI).
+SPIClass sdSpi(HSPI);
 Preferences preferences;
 I2SClass audioI2S;
 PetState pet;
@@ -298,22 +305,72 @@ int32_t touchStartY = -1;
 int32_t touchLastX = -1;
 int32_t touchLastY = -1;
 
-void touchInterrupt() {
-  touch->IIC_Interrupt_Flag = true;
+void IRAM_ATTR touchInterrupt() {
+  touchInterruptPending = true;
+}
+
+// Touch setup follows Waveshare's 2.16" demo; the swap/mirror flags match
+// the MADCTL written in setup().
+bool initTouch() {
+  touch.setPins(BOARD_TP_RST, BOARD_TP_INT);
+  if (!touch.begin(Wire, BOARD_I2C_ADDR_TOUCH, BOARD_I2C_SDA, BOARD_I2C_SCL)) {
+    Serial.println("Touch: CST92xx not found");
+    return false;
+  }
+  touch.setMaxCoordinates(BOARD_LCD_WIDTH, BOARD_LCD_HEIGHT);
+  touch.setSwapXY(BOARD_TP_SWAP_XY);
+  touch.setMirrorXY(BOARD_TP_MIRROR_X, BOARD_TP_MIRROR_Y);
+  pinMode(BOARD_TP_INT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(BOARD_TP_INT), touchInterrupt, FALLING);
+  Serial.printf("Touch: %s ready\n", touch.getModelName());
+  return true;
+}
+
+// Reads the first touch point in UI coordinates. Points in the panel
+// margin around the UI window are clamped to its edge, so a swipe that
+// starts there still counts. Returns false when no finger is down.
+bool readTouchPoint(int32_t &x, int32_t &y) {
+  int16_t xs[2], ys[2];
+  if (touch.getPoint(xs, ys, 1) == 0) return false;
+  x = constrain(xs[0] - UI_ORIGIN_X, 0, UI_WIDTH - 1);
+  y = constrain(ys[0] - UI_ORIGIN_Y, 0, UI_HEIGHT - 1);
+  return true;
+}
+
+// Either BOOT or the user key works as the power key; both read LOW when
+// pressed [board header].
+bool powerKeyDown() {
+  return digitalRead(BOARD_BTN_BOOT) == BOARD_BTN_PRESSED_LEVEL ||
+         digitalRead(BOARD_BTN_USER) == BOARD_BTN_PRESSED_LEVEL;
+}
+
+// Same setup as Waveshare's 2.16" demo: power rails stay at their defaults,
+// only the charge target is set, plus the ADC channels the battery
+// readout below uses.
+void initPmu() {
+  if (!pmu.begin(Wire, BOARD_I2C_ADDR_PMIC, BOARD_I2C_SDA, BOARD_I2C_SCL)) {
+    Serial.println("PMU: AXP2101 not found");
+    return;
+  }
+  pmu.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);
+  pmu.enableBattDetection();
+  pmu.enableVbusVoltageMeasure();
+  pmu.enableBattVoltageMeasure();
+  pmu.enableSystemVoltageMeasure();
 }
 
 bool codecWrite(uint8_t reg, uint8_t value) {
-  Wire.beginTransmission(0x18);
+  Wire.beginTransmission(BOARD_I2C_ADDR_ES8311);
   Wire.write(reg);
   Wire.write(value);
   return Wire.endTransmission() == 0;
 }
 
 uint8_t codecRead(uint8_t reg) {
-  Wire.beginTransmission(0x18);
+  Wire.beginTransmission(BOARD_I2C_ADDR_ES8311);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) return 0;
-  if (Wire.requestFrom(0x18, 1) != 1) return 0;
+  if (Wire.requestFrom(BOARD_I2C_ADDR_ES8311, 1) != 1) return 0;
   return Wire.read();
 }
 
@@ -327,10 +384,10 @@ uint8_t codecRead(uint8_t reg) {
 // power-on defaults (fuel gauge enabled: reg0x18 bit 3; VBAT ADC channel
 // enabled: reg0x30 bit 0 -- both 1 out of reset per the AXP2101 datasheet).
 uint8_t axp2101Read(uint8_t reg) {
-  Wire.beginTransmission(0x34);
+  Wire.beginTransmission(BOARD_I2C_ADDR_PMIC);
   Wire.write(reg);
   if (Wire.endTransmission(false) != 0) return 0;
-  if (Wire.requestFrom(0x34, 1) != 1) return 0;
+  if (Wire.requestFrom(BOARD_I2C_ADDR_PMIC, 1) != 1) return 0;
   return Wire.read();
 }
 
@@ -486,14 +543,14 @@ void updateBatteryTimeEstimate() {
 
 bool initAudio() {
   if (!codecDetected) return false;
-  pinMode(AUDIO_PA, OUTPUT);
-  digitalWrite(AUDIO_PA, HIGH);
+  pinMode(BOARD_AUDIO_PA, OUTPUT);
+  digitalWrite(BOARD_AUDIO_PA, HIGH);
   delay(20);
-  audioI2S.setPins(I2S_BCLK, I2S_LRCLK, I2S_DOUT, I2S_DIN, I2S_MCLK);
+  audioI2S.setPins(BOARD_I2S_BCLK, BOARD_I2S_LRCK, BOARD_I2S_DOUT, BOARD_I2S_DIN, BOARD_I2S_MCLK);
   if (!audioI2S.begin(I2S_MODE_STD, 16000, I2S_DATA_BIT_WIDTH_16BIT,
                       I2S_SLOT_MODE_STEREO, I2S_STD_SLOT_BOTH)) {
     Serial.println("Audio: I2S initialization failed");
-    digitalWrite(AUDIO_PA, LOW);
+    digitalWrite(BOARD_AUDIO_PA, LOW);
     return false;
   }
 
@@ -653,9 +710,9 @@ uint8_t decToBcd(uint8_t value) {
 }
 
 bool rtcRead(struct tm &value) {
-  Wire.beginTransmission(0x51);
+  Wire.beginTransmission(BOARD_I2C_ADDR_RTC);
   Wire.write(0x04);
-  if (Wire.endTransmission(false) != 0 || Wire.requestFrom(0x51, 7) != 7) {
+  if (Wire.endTransmission(false) != 0 || Wire.requestFrom(BOARD_I2C_ADDR_RTC, 7) != 7) {
     return false;
   }
   uint8_t data[7];
@@ -680,7 +737,7 @@ bool rtcWrite(const struct tm &value) {
       decToBcd(value.tm_hour), decToBcd(value.tm_mday),
       decToBcd(value.tm_wday), decToBcd(value.tm_mon + 1),
       decToBcd((value.tm_year + 1900) % 100)};
-  Wire.beginTransmission(0x51);
+  Wire.beginTransmission(BOARD_I2C_ADDR_RTC);
   Wire.write(data, sizeof(data));
   return Wire.endTransmission() == 0;
 }
@@ -699,23 +756,38 @@ void copyConfigValue(char *destination, size_t size, const String &value) {
   clean.toCharArray(destination, size);
 }
 
+// The card sits on its own SPI bus (BOARD_SD_*). Unlike the 1.8" board
+// there is no card power switch to toggle; the slot is always powered.
+bool mountSdCard() {
+  sdSpi.begin(BOARD_SD_SCK, BOARD_SD_MISO, BOARD_SD_MOSI, BOARD_SD_CS);
+  if (!SD.begin(BOARD_SD_CS, sdSpi)) {
+    sdSpi.end();
+    return false;
+  }
+  if (SD.cardType() == CARD_NONE) {
+    SD.end();
+    sdSpi.end();
+    return false;
+  }
+  return true;
+}
+
+void unmountSdCard() {
+  SD.end();
+  sdSpi.end();
+}
+
 bool readNetworkConfig() {
-  if (!SD_MMC.setPins(SDMMC_CLK, SDMMC_CMD, SDMMC_DATA) ||
-      !SD_MMC.begin("/sdcard", true)) {
-    Serial.println("SD: card mount failed");
-    return false;
-  }
-  sdDetected = SD_MMC.cardType() != CARD_NONE;
+  sdDetected = mountSdCard();
   if (!sdDetected) {
-    Serial.println("SD: no card present");
-    SD_MMC.end();
+    Serial.println("SD: card mount failed or no card present");
     return false;
   }
-  File file = SD_MMC.open("/digipet/wifi.ini", FILE_READ);
+  File file = SD.open("/digipet/wifi.ini", FILE_READ);
   if (!file || file.size() == 0 || file.size() > 1024) {
     Serial.println("SD: /digipet/wifi.ini missing or invalid size");
     if (file) file.close();
-    SD_MMC.end();
+    unmountSdCard();
     return false;
   }
   networkConfig = {};
@@ -741,7 +813,7 @@ bool readNetworkConfig() {
     }
   }
   file.close();
-  SD_MMC.end();
+  unmountSdCard();
   networkConfig.valid = networkConfig.ssid[0] && networkConfig.password[0] &&
                         networkConfig.timezone[0] && networkConfig.ntp[0];
   Serial.printf("SD: Wi-Fi configuration %s (credentials hidden)\n",
@@ -750,20 +822,11 @@ bool readNetworkConfig() {
 }
 
 bool mountGenomeCard() {
-  expander.pinMode(7, OUTPUT);
-  expander.digitalWrite(7, HIGH);
-  delay(100);
-  if (!SD_MMC.setPins(SDMMC_CLK, SDMMC_CMD, SDMMC_DATA) ||
-      !SD_MMC.begin("/sdcard", true)) {
-    expander.digitalWrite(7, LOW);
-    return false;
-  }
-  return SD_MMC.cardType() != CARD_NONE;
+  return mountSdCard();
 }
 
 void closeGenomeCard() {
-  SD_MMC.end();
-  expander.digitalWrite(7, LOW);
+  unmountSdCard();
 }
 
 // A BIOS/POST-style scrolling status log, standing in for the old spinner
@@ -809,7 +872,7 @@ void drawBootLogScreen() {
   drawCentered("OFFLINE PLAY REMAINS AVAILABLE", 404, 1, COLOR_MUTED);
   if (transitionsReady) {
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   }
 }
 
@@ -918,11 +981,7 @@ void runStartupNetworkSync() {
   }
   if (!readNetworkConfig() || (!networkConfig.syncOnBoot && clockValid)) return;
 
-  expander.pinMode(7, OUTPUT);
-  expander.digitalWrite(7, HIGH);
-  delay(100);
   synchronizeClock();
-  expander.digitalWrite(7, LOW);
 }
 
 // A deep-sleep resume's counterpart to runStartupNetworkSync() -- unlike a
@@ -955,11 +1014,7 @@ void resyncClockAfterResume() {
   }
   Serial.println("RTC: time is invalid or power was lost (resume) -- attempting recovery sync");
   if (!readNetworkConfig()) return;
-  expander.pinMode(7, OUTPUT);
-  expander.digitalWrite(7, HIGH);
-  delay(100);
   synchronizeClock();
-  expander.digitalWrite(7, LOW);
 }
 
 void generatePlayerId() {
@@ -1044,15 +1099,15 @@ void paintBootBackdrop(const PetPalette &palette) {
   Arduino_GFX *previousDisplay = display;
   display = &pageCanvasB;
   const uint16_t horizon = scaleRgb565(palette.primaryDark, 55);
-  for (int16_t y = 0; y < LCD_HEIGHT; ++y) {
-    display->drawFastHLine(0, y, LCD_WIDTH,
+  for (int16_t y = 0; y < UI_HEIGHT; ++y) {
+    display->drawFastHLine(0, y, UI_WIDTH,
                            lerpRgb565(COLOR_BACKGROUND, horizon,
-                                     static_cast<float>(y) / (LCD_HEIGHT - 1)));
+                                     static_cast<float>(y) / (UI_HEIGHT - 1)));
   }
   auto glowBlob = [&](int16_t x, int16_t y, int16_t radius, uint16_t color,
                       uint8_t maxPercent) {
     const uint16_t backdrop = lerpRgb565(COLOR_BACKGROUND, horizon,
-                                         static_cast<float>(y) / (LCD_HEIGHT - 1));
+                                         static_cast<float>(y) / (UI_HEIGHT - 1));
     for (int16_t r = radius; r > 4; r -= 5) {
       const float t = 1.0f - static_cast<float>(r) / radius;
       display->fillCircle(x, y, r, lerpRgb565(backdrop, color, t * (maxPercent / 100.0f)));
@@ -1069,7 +1124,7 @@ void drawBootParticles(const PetPalette &palette, uint32_t frame, const uint32_t
   for (uint8_t i = 0; i < COUNT; ++i) {
     const uint32_t seedWord = seed[i % 4];
     const uint8_t place = (seedWord >> ((i * 5) % 24)) & 0xFF;
-    const int16_t x = 26 + (place % (LCD_WIDTH - 52));
+    const int16_t x = 26 + (place % (UI_WIDTH - 52));
     const float speed = 0.35f + (i % 5) * 0.12f;
     const float travel = fmodf(rise * speed + i * 37.0f, 300.0f);
     const int16_t y = 344 - static_cast<int16_t>(travel);
@@ -1178,7 +1233,7 @@ void bootOutro(const PetPalette &palette) {
     drawCentered("LIFE SIGNAL ONLINE", 377, 2, lerpRgb565(COLOR_BACKGROUND, COLOR_CYAN, eased));
 
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
     delay(18);
   }
   // The boot clip (started in bootAnimation/bootAnimationFallback) already
@@ -1252,7 +1307,8 @@ void bootAnimation() {
   // display-native frames at 400ms each preserve that complete loop cadence.
   constexpr uint32_t MASCOT_FRAME_MS = 400;
   panel->setBrightness(180);
-  pinMode(0, INPUT_PULLUP);  // lets a power-key press fast-forward the sequence
+  pinMode(BOARD_BTN_BOOT, INPUT);  // lets a power-key press fast-forward the sequence
+  pinMode(BOARD_BTN_USER, INPUT);
   playBootClipAsync();
 
   float progress = 0.0f;
@@ -1261,7 +1317,7 @@ void bootAnimation() {
     const uint32_t elapsed = millis() - animationStarted;
     if (!skipping) {
       progress = min(1.0f, elapsed / static_cast<float>(BOOT_DURATION_MS));
-      if (elapsed > 250 && digitalRead(0) == LOW) skipping = true;
+      if (elapsed > 250 && powerKeyDown()) skipping = true;
     } else {
       progress = min(1.0f, progress + 0.05f);
     }
@@ -1278,7 +1334,7 @@ void bootAnimation() {
     drawBootStatus(progress);
     if (transitionsReady) {
       display = previousDisplay;
-      panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+      panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
     }
 
     if (progress >= 1.0f) break;
@@ -1300,9 +1356,22 @@ void bootAnimation() {
   drawCentered("LIFE SIGNAL ONLINE", 398, 2, COLOR_CYAN);
   if (transitionsReady) {
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   }
   delay(450);
+}
+
+// The panel is bigger than the UI window, and the margins around the window
+// are never drawn to, so they would show whatever the panel RAM held at
+// power-on. Clears the whole 480x480 RAM once, bypassing the driver's
+// window offsets.
+void clearFullPanel() {
+  bus->beginWrite();
+  bus->writeC8D16D16(CO5300_W_CASET, 0, BOARD_LCD_WIDTH - 1);
+  bus->writeC8D16D16(CO5300_W_PASET, 0, BOARD_LCD_HEIGHT - 1);
+  bus->writeCommand(CO5300_W_RAMWR);
+  bus->writeRepeat(0x0000, static_cast<uint32_t>(BOARD_LCD_WIDTH) * BOARD_LCD_HEIGHT);
+  bus->endWrite();
 }
 
 bool i2cPresent(uint8_t address) {
@@ -1314,7 +1383,7 @@ bool i2cPresent(uint8_t address) {
 // start without waiting on the full 126-address scan below (deferred until
 // after the boot animation, since nothing it finds is needed before then).
 void detectAudioHardware() {
-  codecDetected = i2cPresent(0x18);  // ES8311
+  codecDetected = i2cPresent(BOARD_I2C_ADDR_ES8311);
 }
 
 // fullScan enumerates all 126 addresses (and logs every hit) -- worth the
@@ -1339,13 +1408,10 @@ void detectHardware(bool fullScan) {
       }
     }
   }
-  // 0x6A (QMI8658's alternate address) used to be checked here too, but
-  // a live scan against the real board shows nothing answers there --
-  // this board's IMU only responds at 0x6B, so it was always a no-op.
-  imuDetected = i2cPresent(0x6B);   // QMI8658
-  rtcDetected = i2cPresent(0x51);   // PCF85063
-  pmuDetected = i2cPresent(0x34);   // AXP2101
-  codecDetected = i2cPresent(0x18); // ES8311
+  imuDetected = i2cPresent(BOARD_I2C_ADDR_IMU);      // QMI8658
+  rtcDetected = i2cPresent(BOARD_I2C_ADDR_RTC);      // PCF85063
+  pmuDetected = i2cPresent(BOARD_I2C_ADDR_PMIC);     // AXP2101
+  codecDetected = i2cPresent(BOARD_I2C_ADDR_ES8311); // ES8311
   Serial.printf("QMI8658:%s  RTC:%s  PMU:%s  CODEC:%s\n", imuDetected ? "yes" : "no",
                 rtcDetected ? "yes" : "no", pmuDetected ? "yes" : "no",
                 codecDetected ? "yes" : "no");
@@ -1362,7 +1428,7 @@ void presentGenomeProfilePage() {
     display = &pageCanvasA;
     drawGenomeProfilePage();
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   } else {
     drawGenomeProfilePage();
   }
@@ -1423,7 +1489,7 @@ void presentUpdatePage(const char *status, int progress) {
     display = &pageCanvasA;
     drawUpdatePage(status, progress);
     display = previousDisplay;
-    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(), UI_WIDTH, UI_HEIGHT);
   } else {
     drawUpdatePage(status, progress);
   }
@@ -1460,7 +1526,7 @@ void drawToastOverlay() {
   }
 
   const int16_t hiddenY = -(kToastHeight + 6);
-  const int16_t x = (LCD_WIDTH - kToastWidth) / 2;
+  const int16_t x = (UI_WIDTH - kToastWidth) / 2;
   const int16_t y = hiddenY + lroundf((kToastTargetY - hiddenY) * progress);
 
   drawPanelGlow(x, y, kToastWidth, kToastHeight, 20, COLOR_MINT);
@@ -1557,9 +1623,9 @@ void serviceSerialDebug() {
       display = previousDisplay;
     }
 
-    Serial.printf("\nFBDUMP %d %d\n", LCD_WIDTH, LCD_HEIGHT);
+    Serial.printf("\nFBDUMP %d %d\n", UI_WIDTH, UI_HEIGHT);
     Serial.write(reinterpret_cast<uint8_t *>(pageCanvasA.getFramebuffer()),
-                 static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t));
+                 static_cast<size_t>(UI_WIDTH) * UI_HEIGHT * sizeof(uint16_t));
     Serial.flush();
 
     memcpy(bootLog, savedLog, sizeof(bootLog));
@@ -1599,9 +1665,9 @@ void serviceSerialDebug() {
     drawPageDots(PAGE_BATTLE);
     display = previousDisplay;
 
-    Serial.printf("\nFBDUMP %d %d\n", LCD_WIDTH, LCD_HEIGHT);
+    Serial.printf("\nFBDUMP %d %d\n", UI_WIDTH, UI_HEIGHT);
     Serial.write(reinterpret_cast<uint8_t *>(pageCanvasB.getFramebuffer()),
-                 static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t));
+                 static_cast<size_t>(UI_WIDTH) * UI_HEIGHT * sizeof(uint16_t));
     Serial.flush();
     return;
   }
@@ -1624,9 +1690,9 @@ void serviceSerialDebug() {
     drawBattleResultsPage(results, static_cast<uint8_t>(page));
     display = previousDisplay;
 
-    Serial.printf("\nFBDUMP %d %d\n", LCD_WIDTH, LCD_HEIGHT);
+    Serial.printf("\nFBDUMP %d %d\n", UI_WIDTH, UI_HEIGHT);
     Serial.write(reinterpret_cast<uint8_t *>(pageCanvasB.getFramebuffer()),
-                 static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t));
+                 static_cast<size_t>(UI_WIDTH) * UI_HEIGHT * sizeof(uint16_t));
     Serial.flush();
     return;
   }
@@ -1671,9 +1737,9 @@ void serviceSerialDebug() {
   pet.genome = savedGenome;
   pet.stage = savedStage;
 
-  Serial.printf("\nFBDUMP %d %d\n", LCD_WIDTH, LCD_HEIGHT);
+  Serial.printf("\nFBDUMP %d %d\n", UI_WIDTH, UI_HEIGHT);
   Serial.write(reinterpret_cast<uint8_t *>(pageCanvasB.getFramebuffer()),
-               static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t));
+               static_cast<size_t>(UI_WIDTH) * UI_HEIGHT * sizeof(uint16_t));
   Serial.flush();
 }
 
@@ -1684,7 +1750,7 @@ void presentCoherentPageFrame(Page page) {
   }
   renderPageToCanvas(page, pageCanvasA);
   panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(),
-                            LCD_WIDTH, LCD_HEIGHT);
+                            UI_WIDTH, UI_HEIGHT);
 }
 
 // Shared eased slide, used for every full-frame transition in this app
@@ -1705,7 +1771,7 @@ void presentCoherentPageFrame(Page page) {
 void playSlideTransition(const uint16_t *from, const uint16_t *to, bool vertical,
                          bool enterFromEnd, uint8_t frameCount = 18,
                          uint32_t frameTimeMs = 17) {
-  const int16_t span = vertical ? LCD_HEIGHT : LCD_WIDTH;
+  const int16_t span = vertical ? UI_HEIGHT : UI_WIDTH;
   for (uint8_t frame = 1; frame <= frameCount; ++frame) {
     const float linear = static_cast<float>(frame) / frameCount;
     const float eased = linear * linear * (3.0f - 2.0f * linear);
@@ -1714,21 +1780,21 @@ void playSlideTransition(const uint16_t *from, const uint16_t *to, bool vertical
 
     if (vertical) {
       if (enterFromEnd) {
-        if (remaining) memcpy(transitionFrame, from + static_cast<size_t>(shift) * LCD_WIDTH,
-                              static_cast<size_t>(remaining) * LCD_WIDTH * sizeof(uint16_t));
-        if (shift) memcpy(transitionFrame + static_cast<size_t>(remaining) * LCD_WIDTH, to,
-                          static_cast<size_t>(shift) * LCD_WIDTH * sizeof(uint16_t));
+        if (remaining) memcpy(transitionFrame, from + static_cast<size_t>(shift) * UI_WIDTH,
+                              static_cast<size_t>(remaining) * UI_WIDTH * sizeof(uint16_t));
+        if (shift) memcpy(transitionFrame + static_cast<size_t>(remaining) * UI_WIDTH, to,
+                          static_cast<size_t>(shift) * UI_WIDTH * sizeof(uint16_t));
       } else {
-        if (shift) memcpy(transitionFrame, to + static_cast<size_t>(remaining) * LCD_WIDTH,
-                          static_cast<size_t>(shift) * LCD_WIDTH * sizeof(uint16_t));
-        if (remaining) memcpy(transitionFrame + static_cast<size_t>(shift) * LCD_WIDTH, from,
-                              static_cast<size_t>(remaining) * LCD_WIDTH * sizeof(uint16_t));
+        if (shift) memcpy(transitionFrame, to + static_cast<size_t>(remaining) * UI_WIDTH,
+                          static_cast<size_t>(shift) * UI_WIDTH * sizeof(uint16_t));
+        if (remaining) memcpy(transitionFrame + static_cast<size_t>(shift) * UI_WIDTH, from,
+                              static_cast<size_t>(remaining) * UI_WIDTH * sizeof(uint16_t));
       }
     } else {
-      for (int16_t y = 0; y < LCD_HEIGHT; ++y) {
-        uint16_t *out = transitionFrame + static_cast<size_t>(y) * LCD_WIDTH;
-        const uint16_t *oldRow = from + static_cast<size_t>(y) * LCD_WIDTH;
-        const uint16_t *newRow = to + static_cast<size_t>(y) * LCD_WIDTH;
+      for (int16_t y = 0; y < UI_HEIGHT; ++y) {
+        uint16_t *out = transitionFrame + static_cast<size_t>(y) * UI_WIDTH;
+        const uint16_t *oldRow = from + static_cast<size_t>(y) * UI_WIDTH;
+        const uint16_t *newRow = to + static_cast<size_t>(y) * UI_WIDTH;
         if (enterFromEnd) {
           if (remaining) memcpy(out, oldRow + shift, remaining * sizeof(uint16_t));
           if (shift) memcpy(out + remaining, newRow, shift * sizeof(uint16_t));
@@ -1740,7 +1806,7 @@ void playSlideTransition(const uint16_t *from, const uint16_t *to, bool vertical
     }
 
     const uint32_t frameStarted = millis();
-    panel->draw16bitRGBBitmap(0, 0, transitionFrame, LCD_WIDTH, LCD_HEIGHT);
+    panel->draw16bitRGBBitmap(0, 0, transitionFrame, UI_WIDTH, UI_HEIGHT);
     const uint32_t elapsed = millis() - frameStarted;
     if (elapsed < frameTimeMs) delay(frameTimeMs - elapsed);
   }
@@ -1907,7 +1973,7 @@ void presentBattlePage() {
   if (transitionsReady) {
     renderPageToCanvas(PAGE_BATTLE, pageCanvasA);
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(),
-                              LCD_WIDTH, LCD_HEIGHT);
+                              UI_WIDTH, UI_HEIGHT);
   } else {
     gameDrawPage(PAGE_BATTLE);
   }
@@ -1954,7 +2020,7 @@ void updateClockDisplay() {
 
 void changeSetting(int16_t x, int16_t y) {
   if (y < 78 || y >= 364) return;
-  const uint8_t column = x >= LCD_WIDTH / 2;
+  const uint8_t column = x >= UI_WIDTH / 2;
   const uint8_t row = y >= 227;
   const uint8_t item = settingsGridPage * 4 + row * 2 + column;
 
@@ -2075,23 +2141,28 @@ void enterSleep() {
   turnScreenOff();
 }
 
-// GPIO0 is the board's active-low boot button and is also an ESP32-S3 RTC
-// GPIO, so it can wake the chip directly without periodic timer reboots.
+// BOOT (GPIO0) and the user key (GPIO18) are active-low and both ESP32-S3
+// RTC GPIOs, so either can wake the chip directly without periodic timer
+// reboots.
 void enterDeepIdle() {
   recordPowerEvent(PowerEvent::Sleep);
-  // Configure the pin through the RTC block explicitly. Keeping RTC_PERIPH
-  // powered is required for the internal pull-up to remain active; otherwise
-  // GPIO0 can float low in deep sleep and immediately wake the chip again.
-  rtc_gpio_init(GPIO_NUM_0);
-  rtc_gpio_set_direction(GPIO_NUM_0, RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_pullup_en(GPIO_NUM_0);
-  rtc_gpio_pulldown_dis(GPIO_NUM_0);
+  // Configure the pins through the RTC block explicitly. Both keys have
+  // external pull-ups [board header]; the internal ones are enabled as well
+  // so a key can't float low in deep sleep and wake the chip straight
+  // away. Keeping RTC_PERIPH powered keeps those pull-ups active.
+  for (gpio_num_t pin : {static_cast<gpio_num_t>(BOARD_BTN_BOOT),
+                         static_cast<gpio_num_t>(BOARD_BTN_USER)}) {
+    rtc_gpio_init(pin);
+    rtc_gpio_set_direction(pin, RTC_GPIO_MODE_INPUT_ONLY);
+    rtc_gpio_pullup_en(pin);
+    rtc_gpio_pulldown_dis(pin);
+  }
   esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
 
-  // EXT1 is the ESP32-S3's robust multi-RTC-GPIO wake path. ANY_LOW matches
-  // the active-low BOOT switch and consumes no periodic timer wakeups.
+  // EXT1 is the ESP32-S3's robust multi-RTC-GPIO wake path. ANY_LOW wakes
+  // on whichever key is pressed and consumes no periodic timer wakeups.
   const esp_err_t wakeResult = esp_sleep_enable_ext1_wakeup_io(
-      1ULL << GPIO_NUM_0, ESP_EXT1_WAKEUP_ANY_LOW);
+      (1ULL << BOARD_BTN_BOOT) | (1ULL << BOARD_BTN_USER), ESP_EXT1_WAKEUP_ANY_LOW);
   if (wakeResult != ESP_OK) {
     Serial.printf("Deep sleep: button wake setup failed (%d)\n",
                   static_cast<int>(wakeResult));
@@ -2107,7 +2178,7 @@ void turnScreenOff() {
   screenOff = true;
   panel->setBrightness(0);
   panel->displayOff();
-  digitalWrite(AUDIO_PA, LOW);
+  digitalWrite(BOARD_AUDIO_PA, LOW);
   if (externalPowerPresent) {
     Serial.println("Display: off; external power present, remaining awake");
     return;
@@ -2127,7 +2198,7 @@ void turnScreenOff() {
 void wakeUp() {
   if (screenOff) {
     panel->displayOn();
-    digitalWrite(AUDIO_PA, HIGH);
+    digitalWrite(BOARD_AUDIO_PA, HIGH);
     screenOff = false;
   }
   sleeping = false;
@@ -2139,7 +2210,7 @@ void wakeUp() {
   drawHome();
 }
 
-// GPIO0 is a genuine power key now, not just a wake source: a fresh press
+// BOOT/USER are a genuine power key now, not just a wake source: a fresh press
 // wakes it from sleep same as always, but a fresh press while awake also
 // puts it to sleep immediately instead of waiting for the idle timeout.
 // On battery this is a one-way trip through a full reboot (enterSleep()
@@ -2148,7 +2219,7 @@ void wakeUp() {
 void pollPowerButton(uint32_t now) {
   if (now - lastPwrRead < 25) return;
   lastPwrRead = now;
-  const bool down = digitalRead(0) == LOW;
+  const bool down = powerKeyDown();
   if (down && !pwrWasDown) {
     if (sleeping) {
       wakeUp();
@@ -2175,7 +2246,7 @@ void setup() {
   Serial.printf("Wake cause: %d; EXT1 status: 0x%llX\n",
                 static_cast<int>(esp_sleep_get_wakeup_cause()),
                 static_cast<unsigned long long>(esp_sleep_get_ext1_wakeup_status()));
-  Wire.begin(IIC_SDA, IIC_SCL);
+  Wire.begin(BOARD_I2C_SDA, BOARD_I2C_SCL);
   preferences.begin("digipet", false);
   powerTelemetryBegin(resumingFromDeepIdle);
   loadSettings();
@@ -2194,14 +2265,7 @@ void setup() {
       petGenomeDesignId(decodedSelfTest) == petGenomeDesignId(pet.genome);
   Serial.printf("Genome codec: %s\n", genomeCodecReady ? "ready" : "FAILED");
 
-  if (expander.begin(0x20)) {
-    for (uint8_t pin : {0, 1, 2}) {
-      expander.pinMode(pin, OUTPUT);
-      expander.digitalWrite(pin, LOW);
-    }
-    delay(20);
-    for (uint8_t pin : {0, 1, 2}) expander.digitalWrite(pin, HIGH);
-  }
+  initPmu();
 
   // Only what the boot jingle needs is checked before the screen wakes up;
   // the full hardware scan and any network use are deferred until after the
@@ -2211,6 +2275,10 @@ void setup() {
   audioReady = initAudio();
 
   panel->begin();
+  // Same orientation the 2.16" demo sets; the touch swap/mirror flags in
+  // the board header assume it.
+  bus->writeC8D8(BOARD_LCD_MADCTL_REG, BOARD_LCD_MADCTL_VALUE);
+  clearFullPanel();
 
   // Stand up the PSRAM framebuffers before the boot animation so it can use
   // the same double-buffered blit path as the rest of the UI's transitions.
@@ -2218,7 +2286,7 @@ void setup() {
     const bool firstCanvasReady = pageCanvasA.begin(GFX_SKIP_OUTPUT_BEGIN);
     const bool secondCanvasReady = pageCanvasB.begin(GFX_SKIP_OUTPUT_BEGIN);
     transitionFrame = static_cast<uint16_t *>(
-        ps_malloc(static_cast<size_t>(LCD_WIDTH) * LCD_HEIGHT * sizeof(uint16_t)));
+        ps_malloc(static_cast<size_t>(UI_WIDTH) * UI_HEIGHT * sizeof(uint16_t)));
     transitionsReady = firstCanvasReady && secondCanvasReady && transitionFrame;
   }
   Serial.printf("PSRAM: %u bytes; smooth transitions: %s\n",
@@ -2259,14 +2327,9 @@ void setup() {
   generatePlayerId();
   checkEvolution();
 
-  if (touch->begin()) {
-    touch->IIC_Write_Device_State(
-        Arduino_IIC_Touch::Device::TOUCH_DEVICE_INTERRUPT_MODE,
-        Arduino_IIC_Touch::Device_Mode::TOUCH_DEVICE_INTERRUPT_PERIODIC);
-  }
-  // pmuDetected was already set above (detectHardware()); nothing to
-  // initialize on the AXP2101 itself (see axp2101Read()'s own comment) --
-  // just take a first reading so the Status page isn't stuck at 0% before
+  touchReady = initTouch();
+  // pmuDetected was already set above (detectHardware()) and initPmu()
+  // ran early in setup() -- just take a first reading so the Status page isn't stuck at 0% before
   // loop()'s own poll gets to it.
   updateBatteryReading();
   updateBatteryTimeEstimate();
@@ -2274,14 +2337,16 @@ void setup() {
   if (externalPowerPresent) recordPowerEvent(PowerEvent::PowerConnected);
   Serial.printf("Battery: %s (%umV, %u%%)\n", pmuDetected ? "AXP2101 ready" : "PMU not found",
                 batteryVoltageMv, batteryPercent);
-  pinMode(0, INPUT_PULLUP);
+  // Both keys have external 10K pull-ups [board header].
+  pinMode(BOARD_BTN_BOOT, INPUT);
+  pinMode(BOARD_BTN_USER, INPUT);
   // A resume's own wake press can easily still be held down right as
   // loop() starts -- seeding this from the pin's actual current state
   // (rather than the false a fresh RAM global would default to) means
   // pollPowerButton() sees "no new edge" until that same press is
   // released, instead of misreading the tail end of the wake press itself
   // as a brand new one and immediately sleeping right back.
-  pwrWasDown = digitalRead(0) == LOW;
+  pwrWasDown = powerKeyDown();
   nextBlink = millis() + 2200;
   lastMinute = lastInteraction = lastBatteryPoll = lastAnimation = millis();
 
@@ -2293,7 +2358,7 @@ void setup() {
   } else if (transitionsReady) {
     renderPageToCanvas(currentPage, pageCanvasA);
     panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(),
-                              LCD_WIDTH, LCD_HEIGHT);
+                              UI_WIDTH, UI_HEIGHT);
   } else {
     drawHome();
   }
@@ -2445,29 +2510,21 @@ void loop() {
   // that's guaranteed to be thrown away.
   if (sleeping) return;
   // While nothing is touching the panel, only bother reading when the
-  // touch controller's own periodic-mode IRQ (touchInterrupt(), wired up
-  // via TOUCH_DEVICE_INTERRUPT_PERIODIC in setup()) says something is --
-  // that mode pulses the interrupt line for as long as a finger is on the
-  // panel and stays silent otherwise, so gating on it instead of polling
-  // blindly every 25ms skips the I2C round trip entirely for as long as
-  // the screen just sits there, which is most of any awake session.
-  // Once a touch actually starts, this reverts to the exact original
-  // fixed-cadence poll (unconditionally, ignoring the flag) all the way
-  // through release -- deliberately not trusting periodic mode's pulse
-  // behavior for mid-touch tracking or the release edge itself, only for
-  // "should I even check right now."
-  if (!touchWasDown && !touch->IIC_Interrupt_Flag) return;
+  // touch controller's IRQ line (touchInterrupt(), attached in
+  // initTouch()) says something is, so the I2C round trip is skipped
+  // entirely for as long as the screen just sits there, which is most of
+  // any awake session. Once a touch actually starts, this switches to a
+  // fixed-cadence poll (ignoring the flag) all the way through release --
+  // deliberately not trusting the IRQ for mid-touch tracking or the
+  // release edge itself, only for "should I even check right now."
+  if (!touchReady) return;
+  if (!touchWasDown && !touchInterruptPending) return;
   if (now - lastTouchRead < 25) return;
-  touch->IIC_Interrupt_Flag = false;
+  touchInterruptPending = false;
   lastTouchRead = now;
-  const int32_t fingers = touch->IIC_Read_Device_Value(
-      Arduino_IIC_Touch::Value_Information::TOUCH_FINGER_NUMBER);
+  int32_t x = 0, y = 0;
 
-  if (fingers > 0) {
-    const int32_t x = touch->IIC_Read_Device_Value(
-        Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_X);
-    const int32_t y = touch->IIC_Read_Device_Value(
-        Arduino_IIC_Touch::Value_Information::TOUCH_COORDINATE_Y);
+  if (readTouchPoint(x, y)) {
 
     if (!touchWasDown) {
       touchWasDown = true;
@@ -2488,7 +2545,7 @@ void loop() {
       if (currentPage == PAGE_STATUS && statusShowingActions && y >= 78 && y < 364) {
         constexpr int16_t kTileX[] = {18, 190};
         constexpr int16_t kTileY[] = {78, 227};
-        const uint8_t col = x < LCD_WIDTH / 2 ? 0 : 1;
+        const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
         const uint8_t row = y < 227 ? 0 : 1;
         flashPressedHighlight(kTileX[col], kTileY[row], 160, 137, 20);
       } else if (currentPage == PAGE_BATTLE &&
@@ -2496,7 +2553,7 @@ void loop() {
                  battleShowingActions && y >= 78 && y < 364) {
         constexpr int16_t kTileX[] = {18, 190};
         constexpr int16_t kTileY[] = {78, 227};
-        const uint8_t col = x < LCD_WIDTH / 2 ? 0 : 1;
+        const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
         const uint8_t row = y < 227 ? 0 : 1;
         flashPressedHighlight(kTileX[col], kTileY[row], 160, 137, 20);
       } else if (currentPage == PAGE_BATTLE &&
@@ -2504,7 +2561,7 @@ void loop() {
                  !battle.myMoveSubmitted() && y >= 276 && y <= 382) {
         constexpr int16_t kColX[] = {24, 194};
         constexpr int16_t kRowY[] = {280, 336};
-        const uint8_t col = x < LCD_WIDTH / 2 ? 0 : 1;
+        const uint8_t col = x < UI_WIDTH / 2 ? 0 : 1;
         const uint8_t row = y < 329 ? 0 : 1;
         flashPressedHighlight(kColX[col], kRowY[row], 150, 50, 14);
       }
@@ -2558,7 +2615,7 @@ void loop() {
         } else if (transitionsReady) {
           renderPageToCanvas(PAGE_SETTINGS, pageCanvasA);
           panel->draw16bitRGBBitmap(0, 0, pageCanvasA.getFramebuffer(),
-                                    LCD_WIDTH, LCD_HEIGHT);
+                                    UI_WIDTH, UI_HEIGHT);
         } else {
           drawSettingsPage();
         }
