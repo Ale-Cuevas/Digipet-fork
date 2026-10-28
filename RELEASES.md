@@ -19,8 +19,16 @@ Every `v*` release contains:
 - `digipet-manifest.sig`: ECDSA P-256/SHA-256 signature of the manifest
 
 The public verification key is committed at
-`release/firmware-signing-public.pem`. The private key must never enter the
-repository, workflow logs, firmware, release assets, or an SD card.
+`release/firmware-signing-public.pem` and duplicated as `kPublicKey` in
+`src/ota_updater.cpp`; the build workflow fails if the two differ. The private
+key lives outside the repository at `~/.config/digipet/firmware-signing-key.pem`
+and must never enter the repository, workflow logs, firmware, release assets,
+or an SD card.
+
+The device downloads updates from the GitHub repository named by the
+`DIGIPET_OTA_REPO` build flag in `platformio.ini` (default
+`Ale-Cuevas/Digipet-fork`). That repository's release key must match the
+public key compiled into the firmware.
 
 ## Configure the GitHub secret
 
@@ -28,8 +36,8 @@ The release workflow expects `FIRMWARE_SIGNING_KEY_B64`, containing the base64
 encoding of the complete PEM private key as one line:
 
 ```bash
-base64 -w 0 /secure/path/firmware-signing-key.pem | \
-  gh secret set FIRMWARE_SIGNING_KEY_B64 --repo Zetascrub/Digipet
+base64 -w 0 ~/.config/digipet/firmware-signing-key.pem | \
+  gh secret set FIRMWARE_SIGNING_KEY_B64 --repo Ale-Cuevas/Digipet-fork
 ```
 
 On macOS, use `base64 < key.pem | tr -d '\n'` instead of `base64 -w 0`.

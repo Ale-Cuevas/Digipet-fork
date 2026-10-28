@@ -16,6 +16,12 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v5
 
+      - name: Check embedded OTA key matches release key
+        run: |
+          diff <(sed -n '/-----BEGIN PUBLIC KEY-----/,/-----END PUBLIC KEY-----/p' src/ota_updater.cpp \
+                   | sed 's/^.*R"KEY(//') \
+               release/firmware-signing-public.pem
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:

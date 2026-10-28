@@ -3,3 +3,7 @@ dist/
 .vscode/
 .idea/
 provisioning/
+wifi.ini
+genome.txt
+*-key.pem
+*private*.pem

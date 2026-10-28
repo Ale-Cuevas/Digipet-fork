@@ -145,6 +145,10 @@ Tagged releases are built and signed by GitHub Actions. See
 [`RELEASES.md`](RELEASES.md) for key custody, release creation, asset
 formats, and the security rules planned for the self-updater.
 
+This is a fork of [Zetascrub/Digipet](https://github.com/Zetascrub/Digipet).
+Firmware built from this fork updates over the air from this fork's releases
+(see `DIGIPET_OTA_REPO` in `platformio.ini`), not from upstream.
+
 ## License
 
 Digipet is released under the MIT License. Vendored libraries retain their

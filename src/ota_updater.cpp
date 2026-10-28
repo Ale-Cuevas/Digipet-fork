@@ -15,17 +15,24 @@
 #define DIGIPET_VERSION "0.0.0-dev"
 #endif
 
+// GitHub "owner/repo" whose releases this firmware updates from. Must match
+// the repo holding the private key for kPublicKey below.
+#ifndef DIGIPET_OTA_REPO
+#define DIGIPET_OTA_REPO "Ale-Cuevas/Digipet-fork"
+#endif
+
 namespace {
 constexpr char kManifestUrl[] =
-    "https://github.com/Zetascrub/Digipet/releases/latest/download/"
+    "https://github.com/" DIGIPET_OTA_REPO "/releases/latest/download/"
     "digipet-manifest.json";
 constexpr char kSignatureUrl[] =
-    "https://github.com/Zetascrub/Digipet/releases/latest/download/"
+    "https://github.com/" DIGIPET_OTA_REPO "/releases/latest/download/"
     "digipet-manifest.sig";
 constexpr char kTarget[] = "waveshare-esp32-s3-touch-amoled-1.8-v2";
+// Must stay byte-identical to release/firmware-signing-public.pem; CI checks.
 constexpr char kPublicKey[] = R"KEY(-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEO2idrOgAMBZqn2iTwZ3P+0E+HVfc
-7czt5XGZx9qo48NUf7qRmTcSeoBzEIpYSIocNJ3ndxI4e1DYua6HhbNuSw==
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEb80x2OBRpIPT/thjjfM/3yGiGaeS
+177bpRfqVjgTRMkU2mRW5y3ImyyZI0s0r0IlFRDNARiyPiJv8j+ecIhFoA==
 -----END PUBLIC KEY-----
 )KEY";
 
