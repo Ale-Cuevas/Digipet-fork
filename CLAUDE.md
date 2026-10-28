@@ -94,7 +94,7 @@ Other projects (TamaFi, Catode32, Pixel Pets) are **reference only** for ideas; 
 - [x] Get pins from Waveshare's official demo code or schematic. **Ask me if anything is ambiguous; do not invent pin numbers.** (Each value in the header is tagged with its source.)
 - [ ] Minimal "hello" firmware: init power chip (AXP2101), init display, fill screen with color, print text. Verify on the device. (Compiles; device check in `docs/DEVICE_TESTS.md`.)
 - [ ] Init touch (CST9220) and print coordinates to serial. (Compiles; device check in `docs/DEVICE_TESTS.md`.)
-- [ ] Init IMU (QMI8658), RTC (PCF85063), buttons (GPIO18, BOOT).
+- [ ] Init IMU (QMI8658), RTC (PCF85063), buttons (GPIO18, BOOT). (Compiles, plus PWR sensed on GPIO16; device check in `docs/DEVICE_TESTS.md`.)
 
 ### Phase 2 — Port the pet app
 - [ ] Replace/adjust the display layer so the pet UI renders at 480×480 (scale sprites or redesign layout; keep UI sizes in constants).

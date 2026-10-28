@@ -11,6 +11,8 @@
 #include "board_amoled_216.h"  // before XPowersLib: it selects the PMIC driver
 #include <XPowersLib.h>
 #include <TouchDrvCSTXXX.hpp>
+#include <SensorQMI8658.hpp>
+#include <SensorPCF85063.hpp>
 
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
     BOARD_LCD_CS, BOARD_LCD_SCLK, BOARD_LCD_SDIO0, BOARD_LCD_SDIO1, BOARD_LCD_SDIO2, BOARD_LCD_SDIO3);
@@ -20,13 +22,33 @@ Arduino_CO5300 *panel = new Arduino_CO5300(
 
 XPowersPMU pmu;
 TouchDrvCST92xx touch;
+SensorQMI8658 imu;
+SensorPCF85063 rtc;
 bool pmuOk = false;
 bool displayOk = false;
 bool touchOk = false;
+bool imuOk = false;
+bool rtcOk = false;
 volatile bool touchPending = false;
+
+struct ButtonInput {
+  const char *name;
+  uint8_t pin;
+  uint8_t pressedLevel;
+  bool pressed;
+};
+
+ButtonInput buttons[] = {
+    {"BOOT", BOARD_BTN_BOOT, BOARD_BTN_PRESSED_LEVEL, false},
+    {"USER", BOARD_BTN_USER, BOARD_BTN_PRESSED_LEVEL, false},
+    {"PWR", BOARD_BTN_PWR_SENSE, BOARD_BTN_PWR_PRESSED_LEVEL, false},
+};
 
 const uint8_t BRINGUP_BRIGHTNESS = 160;
 const uint32_t STATUS_INTERVAL_MS = 2000;
+const uint16_t RTC_VALID_FROM_YEAR = 2024;  // older means never set or lost power
+const int16_t STATUS_BAND_X = 32;  // clear of the 24 px corner markers
+const int16_t STATUS_BAND_Y = 300;
 
 void initPmu() {
   pmuOk = pmu.begin(Wire, BOARD_I2C_ADDR_PMIC, BOARD_I2C_SDA, BOARD_I2C_SCL);
@@ -99,6 +121,107 @@ void pollTouch() {
   }
 }
 
+// Same accelerometer config as the demo, plus the gyro so both halves of
+// the chip get exercised.
+void initImu() {
+  imuOk = imu.begin(Wire, BOARD_I2C_ADDR_IMU, BOARD_I2C_SDA, BOARD_I2C_SCL);
+  if (!imuOk) {
+    Serial.println("[imu] QMI8658 not found");
+    return;
+  }
+  imu.configAccelerometer(SensorQMI8658::ACC_RANGE_4G, SensorQMI8658::ACC_ODR_1000Hz, SensorQMI8658::LPF_MODE_0);
+  imu.configGyroscope(SensorQMI8658::GYR_RANGE_256DPS, SensorQMI8658::GYR_ODR_896_8Hz, SensorQMI8658::LPF_MODE_0);
+  imu.enableAccelerometer();
+  imu.enableGyroscope();
+  Serial.printf("[imu] QMI8658 ok, chip id 0x%02X\n", imu.getChipID());
+}
+
+// Read-only: the RTC is never written unless asked to over serial, so a
+// device test can check that it kept time across a reset or power cycle.
+void initRtc() {
+  rtcOk = rtc.begin(Wire, BOARD_I2C_SDA, BOARD_I2C_SCL);
+  if (!rtcOk) {
+    Serial.println("[rtc] PCF85063 not found");
+    return;
+  }
+  Serial.printf("[rtc] PCF85063 ok, %s\n", rtc.isRunning() ? "running" : "STOPPED");
+}
+
+void initButtons() {
+  for (ButtonInput &b : buttons) {
+    pinMode(b.pin, INPUT);  // all three have external 10K pull-ups [sch]
+    b.pressed = digitalRead(b.pin) == b.pressedLevel;
+    Serial.printf("[btn] %s on GPIO%u is %s at boot\n", b.name, b.pin, b.pressed ? "PRESSED" : "up");
+  }
+}
+
+void pollButtons() {
+  for (ButtonInput &b : buttons) {
+    const bool pressed = digitalRead(b.pin) == b.pressedLevel;
+    if (pressed == b.pressed) continue;
+    b.pressed = pressed;
+    Serial.printf("[btn] %s %s\n", b.name, pressed ? "down" : "up");
+  }
+}
+
+// "settime YYYY-MM-DD HH:MM:SS" over serial writes the RTC.
+void pollSerialCommands() {
+  if (!Serial.available()) return;
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  int y, mo, d, h, mi, s;
+  if (sscanf(line.c_str(), "settime %d-%d-%d %d:%d:%d", &y, &mo, &d, &h, &mi, &s) == 6) {
+    if (!rtcOk) {
+      Serial.println("[rtc] not available");
+      return;
+    }
+    rtc.setDateTime(y, mo, d, h, mi, s);
+    Serial.println("[rtc] time set");
+  } else if (line.length() > 0) {
+    Serial.println("commands: settime YYYY-MM-DD HH:MM:SS");
+  }
+}
+
+// Writes IMU, RTC and button state to serial and to a band on screen.
+void logSensors() {
+  char imuLine[64] = "IMU: MISSING";
+  if (imuOk) {
+    float ax = 0, ay = 0, az = 0, gx = 0, gy = 0, gz = 0;
+    if (imu.getDataReady()) {
+      imu.getAccelerometer(ax, ay, az);
+      imu.getGyroscope(gx, gy, gz);
+    }
+    Serial.printf("[imu] acc %.2f %.2f %.2f g, gyr %.1f %.1f %.1f dps\n", ax, ay, az, gx, gy, gz);
+    snprintf(imuLine, sizeof(imuLine), "IMU: %+.2f %+.2f %+.2f g", ax, ay, az);
+  }
+
+  char rtcLine[64] = "RTC: MISSING";
+  if (rtcOk) {
+    RTC_DateTime now = rtc.getDateTime();
+    const bool valid = now.getYear() >= RTC_VALID_FROM_YEAR;
+    snprintf(rtcLine, sizeof(rtcLine), "RTC: %04u-%02u-%02u %02u:%02u:%02u%s",
+             now.getYear(), now.getMonth(), now.getDay(), now.getHour(), now.getMinute(),
+             now.getSecond(), valid ? "" : " (unset)");
+    Serial.printf("[rtc] %s\n", rtcLine + 5);
+  }
+
+  char btnLine[64];
+  snprintf(btnLine, sizeof(btnLine), "BTN: BOOT %s USER %s PWR %s",
+           buttons[0].pressed ? "dn" : "up", buttons[1].pressed ? "dn" : "up",
+           buttons[2].pressed ? "dn" : "up");
+
+  if (!displayOk) return;
+  const int16_t lineH = 24;
+  panel->fillRect(STATUS_BAND_X, STATUS_BAND_Y, BOARD_LCD_WIDTH - 2 * STATUS_BAND_X, lineH * 3, RGB565_BLACK);
+  panel->setTextSize(2);
+  panel->setTextColor(RGB565_WHITE);
+  const char *lines[] = {imuLine, rtcLine, btnLine};
+  for (uint8_t i = 0; i < 3; i++) {
+    panel->setCursor(STATUS_BAND_X, STATUS_BAND_Y + i * lineH);
+    panel->print(lines[i]);
+  }
+}
+
 // One full-screen fill per primary so a wrong color order or offset is
 // obvious, then corner markers to check orientation and edge clipping.
 void drawTestScreen() {
@@ -140,6 +263,9 @@ void setup() {
   initPmu();
   initDisplay();
   initTouch();
+  initImu();
+  initRtc();
+  initButtons();
   if (displayOk) drawTestScreen();
 }
 
@@ -148,7 +274,10 @@ void loop() {
   if (millis() - lastStatus >= STATUS_INTERVAL_MS) {
     lastStatus = millis();
     logPmu();
+    logSensors();
   }
   pollTouch();
+  pollButtons();
+  pollSerialCommands();
   delay(10);
 }
