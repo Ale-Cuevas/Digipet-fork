@@ -7,3 +7,4 @@ wifi.ini
 genome.txt
 *-key.pem
 *private*.pem
+.sim/

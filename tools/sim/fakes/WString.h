@@ -7,6 +7,8 @@
 // aware allocation tricks that have no native equivalent and aren't
 // needed for rendering text into an in-memory canvas.
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -69,6 +71,24 @@ class String {
       value_.replace(pos, from.value_.size(), to.value_);
       pos += to.value_.size();
     }
+  }
+  void remove(size_t index) {
+    if (index < value_.size()) value_.erase(index);
+  }
+  void remove(size_t index, size_t count) {
+    if (index < value_.size()) value_.erase(index, count);
+  }
+  void toLowerCase() {
+    for (char &c : value_) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+  }
+  void toUpperCase() {
+    for (char &c : value_) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
+  }
+  void toCharArray(char *buf, size_t bufSize) const {
+    if (!buf || bufSize == 0) return;
+    const size_t n = std::min(bufSize - 1, value_.size());
+    memcpy(buf, value_.data(), n);
+    buf[n] = '\0';
   }
   long toInt() const { return strtol(value_.c_str(), nullptr, 10); }
   float toFloat() const { return strtof(value_.c_str(), nullptr); }
